@@ -1,0 +1,110 @@
+# 文件夹管家 FolderSense — 自动出包流水线
+#
+# 触发：
+#   - 推送 tag（v*，如 v0.1.0）→ 构建三平台安装包并发布到 GitHub Release
+#   - 手动（workflow_dispatch）→ 仅构建并上传 Actions 产物（不发布）
+#
+# 前置（仓库 Settings → Secrets and variables → Actions）：
+#   - 可选代码签名：
+#       CSC_LINK            Windows/macOS 的 p12 证书（base64 或文件 URL）
+#       CSC_KEY_PASSWORD    证书密码
+#     - 不配置则构建“未签名”包（本工作流已默认关闭证书自动发现，
+#       所以缺证书时不会报错，只会生成未签名可执行文件）。
+#   - macOS 公证（可选，进阶）：
+#       APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID
+#       并在 build.yml 的 macOS 步骤放开对应 env。
+#
+# 注意：本应用为 electron-builder 设置了 "asar": false（worker_threads 需按真实路径
+#       加载 indexWorker.js），流水线直接复用 package.json 的 build 配置即可。
+
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write   # release 步骤需要写权限
+
+jobs:
+  build:
+    name: Build ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies (clean)
+        run: npm ci
+
+      - name: Build for Windows
+        if: matrix.os == 'windows-latest'
+        run: npm run dist:win
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+
+      - name: Build for macOS
+        if: matrix.os == 'macos-latest'
+        run: npm run dist:mac
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          # macOS 公证（可选，取消注释并配置仓库 secrets 后生效）：
+          # APPLE_ID: ${{ secrets.APPLE_ID }}
+          # APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: Build for Linux
+        if: matrix.os == 'ubuntu-latest'
+        run: npm run dist:linux
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: FolderSense-${{ matrix.os }}
+          if-no-files-found: ignore
+          path: |
+            dist/*.exe
+            dist/*.zip
+            dist/*.dmg
+            dist/*.AppImage
+            dist/*.deb
+            dist/*.blockmap
+            dist/latest.yml
+            dist/*.yml
+
+  release:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: FolderSense-*
+          merge-multiple: true
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          generate_release_notes: true

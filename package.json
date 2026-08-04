@@ -1,0 +1,55 @@
+{
+  "name": "folder-sense",
+  "productName": "文件夹管家 FolderSense",
+  "version": "0.1.0",
+  "description": "本地文件夹 AI 语义标签与管理工具（中文优先，跨平台桌面应用）",
+  "main": "electron/main.js",
+  "author": "FolderSense",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win",
+    "dist:mac": "electron-builder --mac",
+    "dist:linux": "electron-builder --linux"
+  },
+  "devDependencies": {
+    "electron": "^43.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.foldersense.app",
+    "productName": "FolderSense",
+    "directories": {
+      "output": "dist"
+    },
+    "asar": false,
+    "files": [
+      "electron/**/*",
+      "renderer/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.utilities"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Utility"
+    }
+  }
+}

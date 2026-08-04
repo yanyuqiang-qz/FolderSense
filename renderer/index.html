@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'none';" />
+<title>文件夹管家 FolderSense</title>
+<link rel="stylesheet" href="styles/main.css" />
+</head>
+<body data-theme="dark">
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+    <symbol id="i-folder-open" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v1H6.5L3 18z"/><path d="M6.8 11h15L19 19H4z" opacity=".75"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M6 2h8l5 5v15H6z" opacity=".9"/><path d="M14 2v5h5" opacity=".5"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16 16l4.5 4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-tag" viewBox="0 0 24 24"><path d="M11 3H4a1 1 0 0 0-1 1v7l9.5 9.5a1.5 1.5 0 0 0 2.1 0l6-6a1.5 1.5 0 0 0 0-2.1z"/><circle cx="7.5" cy="7.5" r="1.6" fill="#000" opacity=".45"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><path d="M12 8.5A3.5 3.5 0 1 0 12 15.5 3.5 3.5 0 0 0 12 8.5m8.5 3.5c0 .5 0 1-.1 1.4l2 1.6-2 3.4-2.4-1a7.6 7.6 0 0 1-2.4 1.4l-.4 2.6h-4l-.4-2.6a7.6 7.6 0 0 1-2.4-1.4l-2.4 1-2-3.4 2-1.6a8.6 8.6 0 0 1 0-2.8l-2-1.6 2-3.4 2.4 1A7.6 7.6 0 0 1 8.8 5.2L9.2 2.6h4l.4 2.6a7.6 7.6 0 0 1 2.4 1.4l2.4-1 2 3.4-2 1.6c.1.4.1.9.1 1.4"/></symbol>
+    <symbol id="i-sparkle" viewBox="0 0 24 24"><path d="M12 2l1.9 5.6L19.5 9.5 13.9 11.4 12 17l-1.9-5.6L4.5 9.5l5.6-1.9z"/><path d="M18.5 15l.9 2.6 2.6.9-2.6.9-.9 2.6-.9-2.6-2.6-.9 2.6-.9z" opacity=".7"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.6" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/><path d="M20 3v5h-5" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M5 7h14M10 7V5h4v2M6.5 7l1 13h9l1-13" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4L20 8l-4-4L4 16z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/></symbol>
+    <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-8 8M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 2l8 3v6c0 5-3.4 9.4-8 11-4.6-1.6-8-6-8-11V5z"/></symbol>
+    <symbol id="i-warn" viewBox="0 0 24 24"><path d="M12 3l9.5 17h-19z"/><path d="M12 9v5M12 16.6v.1" stroke="#14171c" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-tree" viewBox="0 0 24 24"><path d="M4 5h6M4 5v14h5M8 12h6M14 19h6M14 12h6M4 5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/><rect x="14" y="3" width="6" height="4" rx="1"/></symbol>
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/></symbol>
+  </defs>
+</svg>
+
+<div id="app">
+  <!-- ============ 顶栏 ============ -->
+  <header class="topbar">
+    <div class="brand">
+      <svg class="ic brand-ic"><use href="#i-folder"/></svg>
+      <div class="brand-text">
+        <b data-i18n="app.name">文件夹管家</b>
+        <span data-i18n="app.sub">看懂你电脑里的每一个文件夹</span>
+      </div>
+    </div>
+
+    <div class="global-search">
+      <svg class="ic"><use href="#i-search"/></svg>
+      <input id="globalSearch" type="search" autocomplete="off"
+             data-i18n-ph="search.placeholder"
+             placeholder="搜索文件夹名称、标签、用途说明…" />
+      <kbd>Ctrl K</kbd>
+    </div>
+
+    <div class="top-actions">
+      <div id="indexPill" class="pill" title="扫描索引状态">
+        <span class="dot"></span><span id="indexPillText">索引未建立</span>
+      </div>
+      <button class="btn ghost" id="btnScan" data-i18n-title="btn.scan.title" title="增量扫描（只读取变化过的目录）">
+        <svg class="ic"><use href="#i-refresh"/></svg><span data-i18n="btn.scan">扫描</span>
+      </button>
+      <button class="btn ghost icon-only" id="btnTheme" title="切换深/浅色">◐</button>
+      <button class="btn ghost icon-only" id="btnSettings" data-i18n-title="btn.settings" title="设置">
+        <svg class="ic"><use href="#i-gear"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- ============ 主体 ============ -->
+  <main class="workspace">
+    <!-- 左侧 -->
+    <aside class="sidebar">
+      <nav class="nav">
+        <button class="nav-item active" data-view="browse">
+          <svg class="ic"><use href="#i-tree"/></svg><span data-i18n="nav.browse">浏览文件夹</span>
+        </button>
+        <button class="nav-item" data-view="tags">
+          <svg class="ic"><use href="#i-tag"/></svg><span data-i18n="nav.tags">按标签查找</span>
+        </button>
+        <button class="nav-item" data-view="settings">
+          <svg class="ic"><use href="#i-gear"/></svg><span data-i18n="nav.settings">设置</span>
+        </button>
+      </nav>
+
+      <div class="side-block" id="placesBlock">
+        <div class="side-title">
+          <span data-i18n="side.places">位置</span>
+          <button class="mini" id="btnAddRoot" data-i18n-title="side.addRoot" title="添加常用文件夹">
+            <svg class="ic"><use href="#i-plus"/></svg>
+          </button>
+        </div>
+        <div id="placesList" class="places"></div>
+      </div>
+
+      <div class="side-block grow" id="tagCloudBlock">
+        <div class="side-title">
+          <span data-i18n="side.tags">标签</span>
+          <button class="mini" id="btnManageTags" data-i18n-title="side.manageTags" title="管理标签">
+            <svg class="ic"><use href="#i-edit"/></svg>
+          </button>
+        </div>
+        <div class="tag-filter-mode">
+          <label><input type="radio" name="tagMode" value="and" checked><span data-i18n="tag.and">同时满足</span></label>
+          <label><input type="radio" name="tagMode" value="or"><span data-i18n="tag.or">任一满足</span></label>
+        </div>
+        <div id="tagCloud" class="tag-cloud"></div>
+      </div>
+    </aside>
+
+    <!-- 中间 -->
+    <section class="content">
+      <!-- 浏览视图 -->
+      <div class="view active" id="view-browse">
+        <div class="toolbar">
+          <div class="crumbs" id="crumbs"></div>
+          <div class="tools">
+            <div class="seg">
+              <button class="seg-btn active" data-mode="tree" title="树形视图"><svg class="ic"><use href="#i-tree"/></svg></button>
+              <button class="seg-btn" data-mode="list" title="列表视图"><svg class="ic"><use href="#i-list"/></svg></button>
+            </div>
+            <input id="filterInput" class="input sm" type="search" placeholder="在当前目录中筛选…" />
+            <select id="typeFilter" class="input sm">
+              <option value="">全部类型</option>
+              <option value="folder">文件夹</option>
+              <option value="image">图片</option>
+              <option value="video">视频</option>
+              <option value="audio">音频</option>
+              <option value="document">文档</option>
+              <option value="sheet">表格</option>
+              <option value="slide">演示</option>
+              <option value="code">代码</option>
+              <option value="archive">压缩包</option>
+              <option value="executable">程序</option>
+              <option value="other">其它</option>
+            </select>
+            <select id="sortSelect" class="input sm">
+              <option value="name-asc">名称 ↑</option>
+              <option value="name-desc">名称 ↓</option>
+              <option value="mtime-desc">修改时间（新→旧）</option>
+              <option value="mtime-asc">修改时间（旧→新）</option>
+              <option value="size-desc">大小（大→小）</option>
+              <option value="size-asc">大小（小→大）</option>
+              <option value="type-asc">类型</option>
+            </select>
+            <label class="chk"><input type="checkbox" id="showFiles" checked><span>显示文件</span></label>
+            <label class="chk"><input type="checkbox" id="showHidden"><span>隐藏项</span></label>
+          </div>
+        </div>
+
+        <div class="bulkbar" id="bulkbar" hidden>
+          <span id="bulkCount">已选 0 项</span>
+          <button class="btn primary sm" id="btnBulkTag">
+            <svg class="ic"><use href="#i-sparkle"/></svg>AI 批量打标签
+          </button>
+          <button class="btn sm" id="btnBulkRetag">重新生成</button>
+          <button class="btn sm" id="btnBulkAddTag">添加标签</button>
+          <button class="btn ghost sm" id="btnBulkClear">取消选择</button>
+        </div>
+
+        <div class="scroller" id="treeScroller">
+          <div class="vspacer" id="treeSpacer"></div>
+          <div class="rows" id="treeRows"></div>
+          <div class="empty" id="treeEmpty" hidden></div>
+        </div>
+      </div>
+
+      <!-- 标签检索视图 -->
+      <div class="view" id="view-tags">
+        <div class="toolbar">
+          <div class="crumbs"><b id="tagResultTitle">按标签查找</b></div>
+          <div class="tools">
+            <input id="tagTextSearch" class="input sm" type="search" placeholder="在已标注的文件夹中搜索…" />
+            <button class="btn sm" id="btnShowAllAnnotated">全部已标注</button>
+            <button class="btn sm" id="btnVerifyLinks" title="检查失效路径并尝试重新关联">检查失效标签</button>
+          </div>
+        </div>
+        <div class="cards" id="tagResults"></div>
+      </div>
+
+      <!-- 设置视图 -->
+      <div class="view" id="view-settings">
+        <div class="settings-wrap" id="settingsWrap"></div>
+      </div>
+    </section>
+
+    <!-- 右侧详情 -->
+    <aside class="detail" id="detailPanel">
+      <div class="detail-empty" id="detailEmpty">
+        <svg class="ic big"><use href="#i-folder"/></svg>
+        <p>选中一个文件夹，这里会显示它的用途说明和标签。</p>
+      </div>
+      <div class="detail-body" id="detailBody" hidden></div>
+    </aside>
+  </main>
+
+  <!-- ============ 状态栏 ============ -->
+  <footer class="statusbar">
+    <span id="statusLeft">就绪</span>
+    <span class="sp"></span>
+    <span id="statusJob"></span>
+    <span id="statusRight"></span>
+  </footer>
+</div>
+
+<div id="modal-root"></div>
+<div id="toast-root"></div>
+
+<script src="js/util.js"></script>
+<script src="js/i18n.js"></script>
+<script src="js/state.js"></script>
+<script src="js/detail.js"></script>
+<script src="js/explorer.js"></script>
+<script src="js/tagsview.js"></script>
+<script src="js/settings.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
