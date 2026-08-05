@@ -15,12 +15,15 @@ const { files } = require('./paths');
 
 const PROMPT_VERSION = 'v1';
 
-const SYSTEM_PROMPT = `你是一个本地文件管理助手。用户会给你一个文件夹的「结构画像」（文件夹名称、子文件夹名、文件扩展名分布、文件数量、采样文件名等元数据，不含任何文件内容）。
-请你推断这个文件夹的用途，并输出简体中文结果。
+const SYSTEM_PROMPT = `你是一个本地文件管理助手。用户会给你一条「文件或文件夹的画像」（只包含名称、扩展名、类型、子项结构等元数据，不含任何文件内容）。
+请你推断它的用途，并输出简体中文结果。
+
+如果是文件夹：说明这个文件夹是做什么的，标签覆盖用途、内容类型、所属领域。
+如果是文件：说明这个文件大概是做什么用的（例如「项目源代码」「会议录音」「安装程序」「设计稿源文件」等），标签覆盖文件类型、用途、领域。
 
 要求：
-1. summary：一句话说明这个文件夹是做什么的，20~60 个汉字，面向不懂英文的普通用户，避免专业术语和英文缩写；如果必须提到英文名词，请在括号里加中文解释。
-2. tags：3~6 个中文语义标签，每个 2~6 个字，用于分类检索。标签应覆盖「用途」「内容类型」「所属领域」等维度，不要重复，不要包含标点。
+1. summary：一句话说明它是做什么的，15~50 个汉字，面向不懂英文的普通用户；遇到英文名词在括号里加中文解释。
+2. tags：3~5 个中文语义标签，每个 2~6 个字，用于分类检索。不要重复，不要包含标点。
 3. category：从 ["用途","项目","内容类型","状态"] 中选一个最贴切的。
 4. confidence：0 到 1 的小数，表示你对这个判断的把握。信息不足时必须给低分（<0.5），不要编造。
 5. reason：不超过 40 字，说明你的判断依据。
@@ -31,38 +34,50 @@ const SYSTEM_PROMPT = `你是一个本地文件管理助手。用户会给你一
 /** 把画像转成给模型看的紧凑文本（同时也是给用户看的"将要发送的数据"） */
 function buildPayload(profile, aiSettings) {
   const lines = [];
-  lines.push(`文件夹名称：${profile.name}`);
-  if (aiSettings.sendFullPath) {
-    lines.push(`完整路径：${profile.fullPath}`);
-  } else if (profile.parentName) {
-    lines.push(`上级文件夹名称：${profile.parentName}`);
-  }
-  lines.push(`直接子文件夹数：${profile.dirCount}，直接文件数：${profile.fileCount}，直接文件总大小：${formatSize(profile.totalSizeOfDirectFiles)}`);
+  const isFile = profile.itemType === 'file';
 
-  if (profile.categories?.length) {
-    lines.push('文件大类分布：' + profile.categories
-      .map((c) => `${CAT_LABEL_ZH[c.cat] || c.cat}×${c.count}`).join('、'));
-  }
-  if (profile.extHistogram?.length) {
-    lines.push('扩展名分布：' + profile.extHistogram
-      .map((e) => `.${e.ext}×${e.count}`).join('、'));
-  }
-  if (profile.subDirNames?.length) {
-    lines.push('子文件夹名（最多 25 个）：' + profile.subDirNames.join('、'));
-  }
-  if (profile.grandChildSample?.length) {
-    const s = profile.grandChildSample
-      .map((g) => `${g.dir}/{${g.children.join(', ')}}`).join(' ; ');
-    lines.push('二级结构抽样：' + s);
-  }
-  if (profile.markers?.length) {
-    lines.push('识别到的特征：' + profile.markers.join('、'));
-  }
-  if (aiSettings.sendFileNames && profile.sampleFileNames?.length) {
-    lines.push(`采样文件名（最多 ${aiSettings.maxSampleFiles} 个，仅文件名不含内容）：` + profile.sampleFileNames.join('、'));
-  }
-  if (profile.newestMtime) {
-    lines.push(`最近修改时间：${new Date(profile.newestMtime).toLocaleDateString('zh-CN')}`);
+  if (isFile) {
+    lines.push(`类型：文件`);
+    lines.push(`文件名称：${profile.name}`);
+    if (aiSettings.sendFullPath) lines.push(`完整路径：${profile.fullPath}`);
+    else if (profile.parentName) lines.push(`上级文件夹名称：${profile.parentName}`);
+    lines.push(`扩展名：${profile.ext || '无'}　文件大类：${CAT_LABEL_ZH[profile.cat] || profile.cat}　大小：${formatSize(profile.size)}`);
+    if (profile.mtimeMs) lines.push(`最近修改时间：${new Date(profile.mtimeMs).toLocaleDateString('zh-CN')}`);
+  } else {
+    lines.push(`类型：文件夹`);
+    lines.push(`文件夹名称：${profile.name}`);
+    if (aiSettings.sendFullPath) {
+      lines.push(`完整路径：${profile.fullPath}`);
+    } else if (profile.parentName) {
+      lines.push(`上级文件夹名称：${profile.parentName}`);
+    }
+    lines.push(`直接子文件夹数：${profile.dirCount}，直接文件数：${profile.fileCount}，直接文件总大小：${formatSize(profile.totalSizeOfDirectFiles)}`);
+
+    if (profile.categories?.length) {
+      lines.push('文件大类分布：' + profile.categories
+        .map((c) => `${CAT_LABEL_ZH[c.cat] || c.cat}×${c.count}`).join('、'));
+    }
+    if (profile.extHistogram?.length) {
+      lines.push('扩展名分布：' + profile.extHistogram
+        .map((e) => `.${e.ext}×${e.count}`).join('、'));
+    }
+    if (profile.subDirNames?.length) {
+      lines.push('子文件夹名（最多 25 个）：' + profile.subDirNames.join('、'));
+    }
+    if (profile.grandChildSample?.length) {
+      const s = profile.grandChildSample
+        .map((g) => `${g.dir}/{${g.children.join(', ')}}`).join(' ; ');
+      lines.push('二级结构抽样：' + s);
+    }
+    if (profile.markers?.length) {
+      lines.push('识别到的特征：' + profile.markers.join('、'));
+    }
+    if (aiSettings.sendFileNames && profile.sampleFileNames?.length) {
+      lines.push(`采样文件名（最多 ${aiSettings.maxSampleFiles} 个，仅文件名不含内容）：` + profile.sampleFileNames.join('、'));
+    }
+    if (profile.newestMtime) {
+      lines.push(`最近修改时间：${new Date(profile.newestMtime).toLocaleDateString('zh-CN')}`);
+    }
   }
   const n = aiSettings.tagCount || 5;
   lines.push(`\n请生成约 ${n} 个中文标签，并给出中文用途说明。`);
@@ -182,7 +197,7 @@ function clamp01(v) {
 }
 
 // ---------------- 本地启发式（离线兜底） ----------------
-const RULES = [
+const FOLDER_RULES = [
   { test: (p) => p.markers.some((m) => /项目|版本库|Git/.test(m)) && p.categories.some((c) => c.cat === 'code'),
     summary: (p) => `一个软件开发项目的代码文件夹，包含源代码与配置文件。`, tags: ['开发项目', '源代码', '工作'] },
   { test: (p) => topCat(p) === 'image' && p.fileCount >= 5,
@@ -203,12 +218,40 @@ const RULES = [
     summary: (p) => `一个用于归类的上层目录，下面有 ${p.dirCount} 个子文件夹。`, tags: ['归档目录', '分类'] },
 ];
 
+const FILE_RULES = [
+  { test: (p) => p.cat === 'code',
+    summary: (p) => `一个 ${p.ext ? '.' + p.ext : ''} 源代码/脚本文件，属于程序开发的一部分。`, tags: ['源代码', '程序开发', '工作'] },
+  { test: (p) => p.cat === 'image',
+    summary: (p) => `一个图片文件，大小 ${formatSize(p.size)}。`, tags: ['图片', '媒体', '素材'] },
+  { test: (p) => p.cat === 'video',
+    summary: (p) => `一个视频文件，大小 ${formatSize(p.size)}。`, tags: ['视频', '媒体'] },
+  { test: (p) => p.cat === 'audio',
+    summary: (p) => `一个音频或录音文件，大小 ${formatSize(p.size)}。`, tags: ['音频', '音乐', '媒体'] },
+  { test: (p) => p.cat === 'document',
+    summary: (p) => `一个文本文档，可能是报告、笔记或资料。`, tags: ['文档', '办公', '资料'] },
+  { test: (p) => p.cat === 'sheet',
+    summary: (p) => `一个表格文件，可能用于数据统计或记录。`, tags: ['表格', '数据', '办公'] },
+  { test: (p) => p.cat === 'slide',
+    summary: (p) => `一个演示文稿，可能用于汇报或展示。`, tags: ['演示', '汇报', '办公'] },
+  { test: (p) => p.cat === 'archive',
+    summary: (p) => `一个压缩包文件，常用于打包传输或备份。`, tags: ['压缩包', '备份'] },
+  { test: (p) => p.cat === 'executable',
+    summary: (p) => `一个可执行程序或安装包。`, tags: ['程序', '软件', '安装包'] },
+  { test: (p) => p.cat === 'design',
+    summary: (p) => `一个设计稿源文件。`, tags: ['设计稿', '素材'] },
+  { test: (p) => p.cat === 'data',
+    summary: (p) => `一个数据文件，可能用于程序或分析。`, tags: ['数据', '资料'] },
+];
+
 function topCat(p) {
+  if (p.itemType === 'file') return p.cat || 'other';
   return p.categories?.[0]?.cat || 'other';
 }
 
 function heuristic(profile) {
-  for (const r of RULES) {
+  const isFile = profile.itemType === 'file';
+  const rules = isFile ? FILE_RULES : FOLDER_RULES;
+  for (const r of rules) {
     try {
       if (r.test(profile)) {
         return normalizeResult({
@@ -216,10 +259,19 @@ function heuristic(profile) {
           tags: r.tags,
           category: '用途',
           confidence: 0.45,
-          reason: '本地规则依据文件类型分布推断（未使用 AI）',
+          reason: '本地规则依据文件类型推断（未使用 AI）',
         }, { source: 'local', model: '本地规则' });
       }
     } catch { /* 规则异常跳过 */ }
+  }
+  if (isFile) {
+    return normalizeResult({
+      summary: `一个 ${profile.ext ? '.' + profile.ext : ''} 文件，具体用途不明确。`,
+      tags: ['待确认'],
+      category: '状态',
+      confidence: 0.2,
+      reason: '信息不足，建议配置 AI 服务后重新生成',
+    }, { source: 'local', model: '本地规则' });
   }
   return normalizeResult({
     summary: `包含 ${profile.dirCount} 个子文件夹、${profile.fileCount} 个文件的文件夹，用途不明确。`,

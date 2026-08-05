@@ -27,29 +27,116 @@
     render(p, profile, ann);
   };
 
-  Detail.showFile = function (r) {
-    curPath = null;
+  Detail.showFile = async function (r) {
+    curPath = r.path;
+    curProfile = { itemType: 'file', name: r.name, ext: r.ext || '', cat: r.cat || 'other', size: r.size || 0, mtimeMs: r.mtimeMs || 0 };
     emptyEl().hidden = true;
     bodyEl().hidden = false;
-    bodyEl().replaceChildren(
-      U.el('div', { class: 'd-head' }, [U.icon('file'), U.el('div', { class: 'd-title', text: r.name })]),
-      U.el('div', { class: 'd-path', text: r.path }),
-      U.el('div', { class: 'd-actions' }, [
-        btn('打开', 'external', () => U.safeCall('fsOpen', r.path)),
-        btn('在文件管理器中显示', null, () => U.safeCall('fsReveal', r.path)),
-      ]),
+    bodyEl().replaceChildren(U.el('div', { class: 'empty', text: '正在读取文件信息…' }));
+
+    const views = await U.call('libViews', [r.path]).catch(() => ({}));
+    if (curPath !== r.path) return;
+    const ann = (views && views[r.path]) || null;
+    S.setAnn(r.path, ann);
+    renderFile(r, ann);
+  };
+
+  function renderFile(r, ann) {
+    const wrap = U.el('div');
+
+    wrap.appendChild(U.el('div', { class: 'd-head' }, [
+      U.icon('file'),
+      U.el('div', {}, [U.el('div', { class: 'd-title', text: r.name })]),
+    ]));
+    wrap.appendChild(U.el('div', { class: 'd-path', text: r.path }));
+
+    wrap.appendChild(U.el('div', { class: 'd-actions' }, [
+      btn(ann && ann.hasAi ? '重新生成' : 'AI 生成标签', 'sparkle', () => Detail.analyze(r.path, true), 'primary'),
+      btn('打开', 'external', () => U.safeCall('fsOpen', r.path)),
+      btn('定位', null, () => U.safeCall('fsReveal', r.path)),
+    ]));
+
+    // 用途说明
+    const sumSec = U.el('div', { class: 'd-sec' });
+    sumSec.appendChild(U.el('div', { class: 'd-sec-title' }, [
+      U.el('span', { text: '用途说明' }),
+      U.el('div', { class: 'right' }, [
+        mini('edit', '手动编辑说明（会覆盖 AI 结果）', () => editSummary(r.path, ann)),
+        ann && ann.summaryOverride ? mini('refresh', '恢复为 AI 生成的说明', async () => {
+          await U.safeCall('libSetSummary', r.path, '');
+          reload(r.path);
+        }) : null,
+      ].filter(Boolean)),
+    ]));
+    const text = ann && ann.summary ? ann.summary : '';
+    sumSec.appendChild(U.el('div', { class: 'summary-box' + (text ? '' : ' placeholder'), text: text || '还没有说明。点上面的「AI 生成标签」，让 AI 根据文件名和类型猜出它的用途。' }));
+    if (ann && (ann.hasAi || ann.summaryOverride)) {
+      const meta = U.el('div', { class: 'summary-meta' });
+      if (ann.summaryOverride) meta.appendChild(U.el('span', { text: '✎ 由你手动编辑', style: { color: 'var(--accent)' } }));
+      if (ann.confidence != null) {
+        const pct = Math.round(ann.confidence * 100);
+        meta.appendChild(U.el('span', { class: 'conf-bar' }, [
+          U.el('span', { text: '把握' }),
+          U.el('span', { class: 'conf-track' }, [U.el('i', { class: 'conf-fill', style: { width: pct + '%', background: U.confColor(ann.confidence), display: 'block' } })]),
+          U.el('b', { text: pct + '%', style: { color: U.confColor(ann.confidence) } }),
+        ]));
+      }
+      if (ann.aiModel) meta.appendChild(U.el('span', { text: '模型：' + ann.aiModel }));
+      if (ann.aiSource === 'local') meta.appendChild(U.el('span', { text: '（离线规则推断）', style: { color: 'var(--warn)' } }));
+      if (ann.aiGeneratedAt) meta.appendChild(U.el('span', { text: U.date(ann.aiGeneratedAt) }));
+      sumSec.appendChild(meta);
+      if (ann.aiReason) sumSec.appendChild(U.el('div', { class: 'hist', style: { marginTop: '6px' }, text: '判断依据：' + ann.aiReason }));
+    }
+    wrap.appendChild(sumSec);
+
+    // 标签
+    const tagSec = U.el('div', { class: 'd-sec' });
+    tagSec.appendChild(U.el('div', { class: 'd-sec-title' }, [U.el('span', { text: '标签' })]));
+    tagSec.appendChild(tagEditor(r.path, ann));
+    wrap.appendChild(tagSec);
+
+    // 备注
+    const noteSec = U.el('div', { class: 'd-sec' });
+    noteSec.appendChild(U.el('div', { class: 'd-sec-title' }, [U.el('span', { text: '我的备注' })]));
+    const ta = U.el('textarea', { class: 'input', rows: 3, placeholder: '写点只有你自己知道的说明…', style: { width: '100%' } });
+    ta.value = (ann && ann.note) || '';
+    const saveNote = U.debounce(async () => {
+      const v = await U.safeCall('libSetNote', r.path, ta.value);
+      if (v) S.setAnn(r.path, v);
+    }, 500);
+    ta.addEventListener('input', saveNote);
+    noteSec.appendChild(ta);
+    wrap.appendChild(noteSec);
+
+    // 文件元信息
+    wrap.appendChild(U.el('div', { class: 'd-sec' }, [
+      U.el('div', { class: 'd-sec-title' }, [U.el('span', { text: '文件信息' })]),
       U.el('div', { class: 'stat-grid' }, [
         stat('文件大小', U.size(r.size)),
         stat('类型', U.CAT_ZH[r.cat] || '其它'),
         stat('修改时间', U.date(r.mtimeMs)),
         stat('扩展名', r.ext ? '.' + r.ext : '无'),
       ]),
-      U.el('div', { class: 'notice info', style: { marginTop: '14px' } }, [
-        U.icon('shield'),
-        U.el('div', { text: '标签只能加在文件夹上。本工具不读取任何文件的内容。' }),
-      ]),
-    );
-  };
+    ]));
+
+    // 清除
+    if (ann) {
+      wrap.appendChild(U.el('div', { class: 'd-sec' }, [
+        U.el('button', {
+          class: 'btn danger sm', text: '清除这个文件的全部标注',
+          onclick: async () => {
+            if (!(await U.confirm('确认清除', `将删除「${U.esc(U.basename(r.path))}」的 AI 说明、标签和备注。<br>此操作不可撤销。`, true))) return;
+            await U.safeCall('libClearAnnotation', r.path);
+            S.ann.delete(r.path);
+            reload(r.path);
+            U.toast('已清除', 'ok');
+          },
+        }),
+      ]));
+    }
+
+    bodyEl().replaceChildren(wrap);
+  }
 
   Detail.clear = function () {
     curPath = null;
@@ -82,6 +169,7 @@
     // 操作按钮
     wrap.appendChild(U.el('div', { class: 'd-actions' }, [
       btn(ann && ann.hasAi ? '重新生成' : 'AI 生成标签', 'sparkle', () => Detail.analyze(p, true), 'primary'),
+      btn('递归分析子项', 'sparkle', () => Detail.analyzeRecursive(p)),
       btn('打开', 'external', () => U.safeCall('fsOpen', p)),
       btn('定位', null, () => U.safeCall('fsReveal', p)),
       btn('将发送什么？', 'shield', () => showPrivacyPreview(p)),
@@ -314,11 +402,34 @@
     }
   };
 
+  Detail.analyzeRecursive = async function (p) {
+    const s = S.settings;
+    const hasKey = s.ai.hasApiKey && s.ai.enabled;
+    const depth = s.ai.recursiveMaxDepth ?? 3;
+    const msg = hasKey
+      ? `将递归分析「<b>${U.esc(U.basename(p))}</b>」下最多 <b>${depth}</b> 层深的所有文件夹和文件。<br>
+         每个子项都会调用一次 AI（只发文件名和类型，不发内容），可能产生较多 API 费用。`
+      : `尚未配置 AI，将使用<b>离线规则</b>递归推断「<b>${U.esc(U.basename(p))}</b>」下最多 <b>${depth}</b> 层深的所有子项（免费但不精确）。`;
+    if (!(await U.confirm('递归 AI 分析', msg))) return;
+    const r = await U.safeCall('aiBatch', [p], { recursive: true });
+    if (r) {
+      U.toast(`递归任务已开始：${r.total} 个待处理` + (r.skipped ? `，${r.skipped} 个已有结果被跳过` : ''), '', 4000);
+      if (r.total === 0) U.toast('所选范围下都已经有结果了', 'warn');
+    }
+  };
+
   async function reload(p) {
     const views = await U.call('libViews', [p]).catch(() => ({}));
     const ann = (views && views[p]) || null;
     S.ann.set(p, ann);
-    if (curPath === p) render(p, curProfile, ann);
+    if (curPath === p) {
+      if (curProfile && curProfile.itemType === 'file') {
+        // 重新构造一个最小的文件行对象用于 renderFile
+        renderFile({ path: p, name: U.basename(p), isDir: false, size: curProfile.size || 0, mtimeMs: curProfile.mtimeMs || 0, cat: curProfile.cat || 'other', ext: curProfile.ext || '' }, ann);
+      } else {
+        render(p, curProfile, ann);
+      }
+    }
     Explorer.render();
   }
   Detail.reload = reload;

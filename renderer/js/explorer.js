@@ -176,7 +176,7 @@
       const r = rows[i];
       if (!r) continue;
       frag.appendChild(renderRow(r));
-      if (r.isDir && !r.isUp && !S.ann.has(r.path)) wantAnn.push(r.path);
+      if (!r.isUp && !r.loadingRow && !r.emptyRow && !S.ann.has(r.path)) wantAnn.push(r.path);
     }
     rowsEl.replaceChildren(frag);
 
@@ -205,7 +205,7 @@
       ]);
     }
 
-    const ann = r.isDir ? S.ann.get(r.path) : null;
+    const ann = S.ann.get(r.path) || null;
     const cls = ['row'];
     if (S.selected === r.path) cls.push('selected');
     if (S.checked.has(r.path)) cls.push('checked');
@@ -426,6 +426,7 @@
     if (r.isDir) {
       items.push({ t: '展开 / 进入', f: () => Explorer.activate(r) });
       items.push({ t: 'AI 生成标签', f: () => Detail.analyze(r.path, true) });
+      items.push({ t: '递归分析子项', f: () => Detail.analyzeRecursive(r.path) });
       items.push({ t: r.path && S.checked.has(r.path) ? '取消勾选' : '勾选（批量操作）', f: () => {
         if (S.checked.has(r.path)) S.checked.delete(r.path); else S.checked.add(r.path);
         renderWindow(true); updateBulkBar();

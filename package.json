@@ -1,7 +1,7 @@
 {
   "name": "folder-sense",
   "productName": "文件夹管家 FolderSense",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "本地文件夹 AI 语义标签与管理工具（中文优先，跨平台桌面应用）",
   "main": "electron/main.js",
   "author": {

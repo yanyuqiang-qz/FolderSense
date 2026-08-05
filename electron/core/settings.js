@@ -46,6 +46,8 @@ const DEFAULTS = {
     concurrency: 2,
     tagCount: 5,
     maxSampleFiles: 40,
+    recursiveMaxDepth: 3,   // 递归 AI 打标签默认最深 3 层
+    analyzeFiles: true,     // 递归时是否也给文件打标签
     // ---- 隐私开关（默认最保守）----
     sendFileNames: true,     // 发送采样文件名（帮助判断用途）
     sendFullPath: false,     // 发送完整绝对路径（默认关闭，只发文件夹名）

@@ -123,9 +123,11 @@
       frow('API Key', ai.hasApiKey ? '当前已保存：' + ai.apiKeyMask : '尚未设置', [keyI, keyBtn, ai.hasApiKey ? keyClr : null].filter(Boolean)),
       frow('模型', '推荐用便宜的小模型，够用且省钱', [modelI, modelBtn]),
       frow('连接测试', '发一条极短的消息验证配置是否正确', testBtn),
-      frow('生成标签数量', '每个文件夹生成几个标签', numInput(ai.tagCount, 3, 8, (v) => patch({ ai: { tagCount: v } }))),
+      frow('生成标签数量', '每个项目生成几个标签', numInput(ai.tagCount, 3, 8, (v) => patch({ ai: { tagCount: v } }))),
       frow('并发数', '批量打标签时同时请求几个（太大容易被限流）', numInput(ai.concurrency, 1, 8, (v) => patch({ ai: { concurrency: v } }))),
       frow('超时时间（秒）', '', numInput(Math.round(ai.timeoutMs / 1000), 5, 300, (v) => patch({ ai: { timeoutMs: v * 1000 } }))),
+      frow('递归分析深度', '递归 AI 打标签时最多往下走几层（防失控）', numInput(ai.recursiveMaxDepth ?? 3, 1, 10, (v) => patch({ ai: { recursiveMaxDepth: v } }))),
+      frow('递归时分析文件', '关闭后递归只分析文件夹，速度更快', toggle(ai.analyzeFiles !== false, (v) => patch({ ai: { analyzeFiles: v } }))),
     ]);
   }
 

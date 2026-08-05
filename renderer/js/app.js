@@ -179,7 +179,7 @@
     const st = await U.safeCall('libStats');
     if (!st) return;
     U.$('#statusRight').textContent =
-      `已标注 ${st.annotated} 个文件夹　AI 生成 ${st.withAi}　标签 ${st.tags} 个` +
+      `已标注 ${st.annotated} 个项目　AI 生成 ${st.withAi}　标签 ${st.tags} 个` +
       (st.missing ? `　失效 ${st.missing}` : '');
   }
   App.updateStatus = updateStatus;
@@ -296,13 +296,16 @@
   async function bulkTag(force) {
     const paths = [...S.checked];
     if (!paths.length) return;
+    const recursive = U.$('#bulkRecursive').checked;
+    const depth = S.settings.ai.recursiveMaxDepth ?? 3;
     const hasKey = S.settings.ai.hasApiKey && S.settings.ai.enabled;
+    const scope = recursive ? `递归分析每个选中文件夹下最多 <b>${depth}</b> 层的所有子文件夹和文件` : `对 <b>${paths.length}</b> 个文件夹`;
     const msg = hasKey
-      ? `将对 <b>${paths.length}</b> 个文件夹调用 AI 生成说明和标签。<br>
-         每个文件夹会发送一次请求（只发结构信息，不发文件内容），可能产生 API 费用。`
-      : `尚未配置 AI，将使用<b>离线规则</b>为 <b>${paths.length}</b> 个文件夹推断用途（免费、不联网，但准确度较低）。`;
+      ? `将${scope}调用 AI 生成说明和标签。<br>
+         每个项目会发送一次请求（只发名称和类型，不发文件内容），可能产生 API 费用。`
+      : `尚未配置 AI，将使用<b>离线规则</b>${scope}推断用途（免费、不联网，但准确度较低）。`;
     if (!(await U.confirm(force ? '重新生成标签' : '批量生成标签', msg))) return;
-    const r = await U.safeCall('aiBatch', paths, { force });
+    const r = await U.safeCall('aiBatch', paths, { force, recursive });
     if (r) {
       U.toast(`任务已开始：${r.total} 个待处理` + (r.skipped ? `，${r.skipped} 个已有结果被跳过` : ''), '', 4000);
       if (r.total === 0) U.toast('都已经有结果了，如需覆盖请点「重新生成」', 'warn');

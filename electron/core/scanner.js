@@ -289,6 +289,40 @@ function sortEntries(list, sort) {
   return arr;
 }
 
+// ---------------- 文件画像（供 AI 分析单个文件用） ----------------
+async function buildFileProfile(filePath, settings) {
+  const p = normalize(filePath);
+  let st;
+  try { st = await fsp.lstat(p); }
+  catch (e) { throw wrapFsError(e, p); }
+  if (st.isDirectory()) throw new Error('不是文件: ' + p);
+
+  const ext = extOf(p);
+  return {
+    itemType: 'file',
+    name: path.basename(p),
+    parentName: path.basename(path.dirname(p)) || '',
+    fullPath: p,
+    ext,
+    cat: categoryOf(p),
+    size: Number(st.size) || 0,
+    mtimeMs: st.mtimeMs,
+    birthtimeMs: st.birthtimeMs,
+  };
+}
+
+/**
+ * 根据路径自动判断是文件还是文件夹，生成对应画像
+ */
+async function buildItemProfile(itemPath, settings) {
+  const p = normalize(itemPath);
+  let st;
+  try { st = await fsp.lstat(p); }
+  catch (e) { throw wrapFsError(e, p); }
+  if (st.isDirectory()) return buildProfile(p, settings);
+  return buildFileProfile(p, settings);
+}
+
 // ---------------- 文件夹画像（供 AI / 详情面板使用） ----------------
 /**
  * 只读取元数据：名称、类型分布、结构，不读取任何文件内容
@@ -332,6 +366,7 @@ async function buildProfile(dirPath, settings, opts = {}) {
   const oldest = fileEntries.reduce((m, f) => (m === 0 ? f.mtimeMs : Math.min(m, f.mtimeMs)), 0);
 
   return {
+    itemType: 'folder',
     name: path.basename(p) || p,
     parentName: path.basename(path.dirname(p)) || '',
     fullPath: p,
@@ -348,6 +383,49 @@ async function buildProfile(dirPath, settings, opts = {}) {
     newestMtime: newest,
     oldestMtime: oldest,
   };
+}
+
+// ---------------- 递归遍历树（用于递归 AI 打标签） ----------------
+/**
+ * 递归收集目录下所有文件和子文件夹（返回扁平列表）
+ * @param {string} dirPath
+ * @param {object} settings
+ * @param {{maxDepth?:number, includeFiles?:boolean, includeDirs?:boolean, maxTotal?:number}} opts
+ * @returns {Promise<{path:string,isDir:boolean,depth:number}[]>}
+ */
+async function walkTree(dirPath, settings, opts = {}) {
+  const root = normalize(dirPath);
+  const maxDepth = opts.maxDepth ?? 3;
+  const includeFiles = opts.includeFiles !== false;
+  const includeDirs = opts.includeDirs !== false;
+  const maxTotal = opts.maxTotal ?? 5000;
+  const excluded = makeExcluder(settings.scan || {});
+
+  const out = [];
+  const queue = [{ p: root, depth: 0 }];
+
+  while (queue.length && out.length < maxTotal) {
+    const { p, depth } = queue.shift();
+    if (depth > maxDepth) continue;
+
+    let raw;
+    try { raw = await readDirRaw(p, settings); }
+    catch { continue; }
+
+    for (const e of raw.entries) {
+      if (e.hidden) continue;
+      if (e.isDir && excluded(e.name)) continue;
+
+      if (e.isDir) {
+        if (includeDirs) out.push({ path: e.path, isDir: true, depth });
+        if (depth < maxDepth) queue.push({ p: e.path, depth: depth + 1 });
+      } else if (includeFiles) {
+        out.push({ path: e.path, isDir: false, depth });
+      }
+    }
+  }
+
+  return out;
 }
 
 // ---------------- 文件夹指纹（用于移动/重命名后重新关联） ----------------
@@ -409,7 +487,8 @@ async function statSafe(p) {
 }
 
 module.exports = {
-  normalize, getRoots, listDir, readDirRaw, sortEntries, buildProfile,
+  normalize, getRoots, listDir, readDirRaw, sortEntries,
+  buildProfile, buildFileProfile, buildItemProfile, walkTree,
   computeFingerprint, fingerprintScore, clearCache, cacheStats, exists, statSafe,
   makeExcluder, wrapFsError,
 };

@@ -212,7 +212,7 @@ function registerIpc(ctx, getWin) {
   // ---------------- AI ----------------
   H('ai:preview', async (dirPath) => {
     const s = settings.all();
-    const profile = await scanner.buildProfile(requireString(dirPath, 'dirPath'), s);
+    const profile = await scanner.buildItemProfile(requireString(dirPath, 'dirPath'), s);
     return {
       payload: ai.buildPayload(profile, s.ai),
       system: ai.SYSTEM_PROMPT,
@@ -228,10 +228,12 @@ function registerIpc(ctx, getWin) {
   H('ai:analyzeOne', async (dirPath) => {
     const p = scanner.normalize(requireString(dirPath, 'dirPath'));
     const s = settings.all();
-    const profile = await scanner.buildProfile(p, s);
+    const profile = await scanner.buildItemProfile(p, s);
     const result = await ai.analyze(profile, s, settings.getApiKey());
     let fp = null;
-    try { fp = await scanner.computeFingerprint(p, s); } catch { /* ignore */ }
+    if (profile.itemType === 'folder') {
+      try { fp = await scanner.computeFingerprint(p, s); } catch { /* ignore */ }
+    }
     const view = library.setAIResult(p, result, fp);
     await library.flush();
     return view;

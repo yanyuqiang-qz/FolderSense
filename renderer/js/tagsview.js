@@ -32,7 +32,7 @@
         const chip = U.el('span', {
           class: 'tag-chip' + (on ? ' on' : ''),
           style: U.tagStyle(t.color),
-          title: `${t.name}（${t.usage || 0} 个文件夹）${t.source === 'ai' ? ' · AI 生成' : ''}`,
+          title: `${t.name}（${t.usage || 0} 个项目）${t.source === 'ai' ? ' · AI 生成' : ''}`,
           onclick: () => {
             if (S.activeTagIds.has(t.id)) S.activeTagIds.delete(t.id);
             else S.activeTagIds.add(t.id);

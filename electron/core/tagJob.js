@@ -42,7 +42,7 @@ class TagJobRunner {
 
   /**
    * @param {string[]} paths
-   * @param {{force?:boolean}} opts force=true 时对已有 AI 结果的文件夹也重新生成
+   * @param {{force?:boolean, recursive?:boolean, maxDepth?:number, includeFiles?:boolean}} opts
    */
   async start(paths, opts = {}) {
     if (this.current) throw new Error('已有批量任务在执行中，请先等待或取消');
@@ -50,12 +50,38 @@ class TagJobRunner {
     const settings = settingsMgr.all();
     const apiKey = settingsMgr.getApiKey();
 
+    const recursive = !!opts.recursive;
+    const analyzeFiles = opts.includeFiles !== false;
+    const maxDepth = Math.max(1, Math.min(10, opts.maxDepth ?? settings.ai?.recursiveMaxDepth ?? 3));
+
     const targets = [];
-    for (const p of paths) {
-      const norm = scanner.normalize(p);
-      const existing = this.library.raw(norm);
-      if (!opts.force && existing && existing.aiGeneratedAt) continue;
-      targets.push(norm);
+    let skipped = 0;
+    if (recursive) {
+      for (const p of paths) {
+        const norm = scanner.normalize(p);
+        try {
+          const tree = await scanner.walkTree(norm, settings, {
+            maxDepth,
+            includeFiles: analyzeFiles,
+            includeDirs: true,
+            maxTotal: 8000,
+          });
+          for (const item of tree) {
+            const existing = this.library.raw(item.path);
+            if (!opts.force && existing && existing.aiGeneratedAt) { skipped++; continue; }
+            targets.push(item.path);
+          }
+        } catch (e) {
+          console.error('[tagJob] walkTree failed', norm, e);
+        }
+      }
+    } else {
+      for (const p of paths) {
+        const norm = scanner.normalize(p);
+        const existing = this.library.raw(norm);
+        if (!opts.force && existing && existing.aiGeneratedAt) { skipped++; continue; }
+        targets.push(norm);
+      }
     }
 
     const jobId = 'job_' + Date.now();
@@ -63,7 +89,7 @@ class TagJobRunner {
       jobId,
       total: targets.length,
       done: 0, ok: 0, failed: 0,
-      skipped: paths.length - targets.length,
+      skipped,
       currentPath: '',
       cancelled: false,
       abort: new AbortController(),
@@ -80,10 +106,12 @@ class TagJobRunner {
         const p = queue.shift();
         job.currentPath = p;
         try {
-          const profile = await scanner.buildProfile(p, settings);
+          const profile = await scanner.buildItemProfile(p, settings);
           const result = await ai.analyze(profile, settings, apiKey, { signal: job.abort.signal });
           let fp = null;
-          try { fp = await scanner.computeFingerprint(p, settings); } catch { /* 忽略 */ }
+          if (profile.itemType === 'folder') {
+            try { fp = await scanner.computeFingerprint(p, settings); } catch { /* 忽略 */ }
+          }
           this.library.setAIResult(p, result, fp);
           job.ok++;
         } catch (e) {
