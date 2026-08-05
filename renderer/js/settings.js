@@ -23,6 +23,8 @@
     wrap.appendChild(aiGroup(s));
     wrap.appendChild(privacyGroup(s));
     wrap.appendChild(scanGroup(s));
+    wrap.appendChild(notifGroup(s));
+    wrap.appendChild(schedulerGroup(s));
     wrap.appendChild(uiGroup(s));
     wrap.appendChild(aboutGroup());
   };
@@ -278,6 +280,70 @@
     ]);
   }
 
+  /* ---------- 通知 ---------- */
+  function notifGroup(s) {
+    const n = s.notifications || {};
+    return group('通知提醒', 'refresh', [
+      U.el('div', { class: 'notice info' }, [U.icon('refresh'), U.el('div', { html:
+        '在以下事件发生时，通过系统通知提醒你。所有通知都可以单独开关。' })]),
+      frow('扫描完成', '索引扫描结束时通知', toggle(n.scanComplete !== false, (v) => patch({ notifications: { scanComplete: v } }))),
+      frow('发现大文件', '空间分析发现超过 100MB 的文件时通知', toggle(n.largeFiles !== false, (v) => patch({ notifications: { largeFiles: v } }))),
+      frow('批量打标签完成', 'AI 批量任务结束时通知', toggle(n.tagComplete !== false, (v) => patch({ notifications: { tagComplete: v } }))),
+    ]);
+  }
+
+  /* ---------- 定时自动扫描 ---------- */
+  function schedulerGroup(s) {
+    const sched = s.scheduler || {};
+    const enabled = !!sched.enabled;
+    const hours = sched.intervalHours || 24;
+
+    const intervalSel = U.el('select', { class: 'input sm', disabled: !enabled, style: { width: '120px' } }, [
+      U.el('option', { value: '1', text: '每 1 小时', selected: hours === 1 }),
+      U.el('option', { value: '2', text: '每 2 小时', selected: hours === 2 }),
+      U.el('option', { value: '6', text: '每 6 小时', selected: hours === 6 }),
+      U.el('option', { value: '12', text: '每 12 小时', selected: hours === 12 }),
+      U.el('option', { value: '24', text: '每 24 小时（默认）', selected: hours === 24 }),
+      U.el('option', { value: '48', text: '每 2 天', selected: hours === 48 }),
+      U.el('option', { value: '168', text: '每周', selected: hours === 168 }),
+    ]);
+
+    const statusEl = U.el('span', { class: 'conf', text: '', style: { fontSize: '11px', color: 'var(--text-dim)' } });
+
+    // 加载当前调度器状态
+    (async () => {
+      try {
+        const st = await U.safeCall('schedulerStatus');
+        if (st && st['auto-scan']) {
+          const t = st['auto-scan'];
+          statusEl.textContent = t.active
+            ? (t.lastRunAt ? `运行中 · 上次: ${new Date(t.lastRunAt).toLocaleString('zh-CN')}` : '运行中')
+            : '未启动';
+        }
+      } catch { /* ignore */ }
+    })();
+
+    intervalSel.addEventListener('change', async () => {
+      const cfg = { enabled: !!sched.enabled, intervalHours: Number(intervalSel.value) };
+      await patch({ scheduler: cfg });
+      U.toast(`扫描间隔已设为 ${intervalSel.options[intervalSel.selectedIndex].text}`, 'ok');
+    });
+
+    return group('定时自动扫描', 'clock', [
+      U.el('div', { class: 'notice info' }, [U.icon('clock'), U.el('div', { html:
+        '开启后，应用会按设定间隔<b>自动执行索引扫描</b>，保持文件索引始终最新。首次启动后延迟约 10 秒开始第一次扫描。' })]),
+      frow('启用定时扫描', '', toggle(enabled, async (v) => {
+        intervalSel.disabled = !v;
+        const cfg = { enabled: v, intervalHours: Number(intervalSel.value) };
+        await patch({ scheduler: cfg });
+        if (!v) statusEl.textContent = '已关闭';
+        else { statusEl.textContent = '已启用'; }
+      })),
+      frow('扫描间隔', '两次自动扫描之间的时间', intervalSel),
+      frow('状态', '', statusEl),
+    ]);
+  }
+
   /* ---------- 界面 ---------- */
   function uiGroup(s) {
     const langSel = U.el('select', { class: 'input sm' }, [
@@ -312,6 +378,7 @@
         const v = await U.safeCall('settingsReset');
         if (v) { S.settings = v; App.applySettings(); Settings.render(); U.toast('已恢复默认', 'ok'); }
       } })),
+      frow('重新看引导', '再次显示首次使用的 3 步引导向导', U.el('button', { class: 'btn sm', text: '重新看引导', onclick: () => Onboarding.show() })),
     ]);
   }
 

@@ -24,7 +24,7 @@
     curProfile = profile;
     const ann = (views && views[p]) || null;
     S.ann.set(p, ann);
-    render(p, profile, ann);
+    await render(p, profile, ann);
   };
 
   Detail.showFile = async function (r) {
@@ -52,6 +52,7 @@
 
     wrap.appendChild(U.el('div', { class: 'd-actions' }, [
       btn(ann && ann.hasAi ? '重新生成' : 'AI 生成标签', 'sparkle', () => Detail.analyze(r.path, true), 'primary'),
+      btn('预览', null, () => showPreviewPanel(r.path)),
       btn('问 AI 管家', 'chat', () => window.Butler && window.Butler.askAbout(r.path)),
       btn('打开', 'external', () => U.safeCall('fsOpen', r.path)),
       btn('定位', null, () => U.safeCall('fsReveal', r.path)),
@@ -148,7 +149,7 @@
   Detail.current = () => curPath;
 
   /* ---------------- 主渲染 ---------------- */
-  function render(p, profile, ann) {
+  async function render(p, profile, ann) {
     const wrap = U.el('div');
 
     // 头部
@@ -172,6 +173,8 @@
       btn(ann && ann.hasAi ? '重新生成' : 'AI 生成标签', 'sparkle', () => Detail.analyze(p, true), 'primary'),
       btn('递归分析子项', 'sparkle', () => Detail.analyzeRecursive(p)),
       btn('问 AI 管家', 'chat', () => window.Butler && window.Butler.askAbout(p)),
+      btn('空间分析', null, () => showSpacePanel(p)),
+      btn('重复文件', null, () => showDedupPanel(p)),
       btn('打开', 'external', () => U.safeCall('fsOpen', p)),
       btn('定位', null, () => U.safeCall('fsReveal', p)),
       btn('将发送什么？', 'shield', () => showPrivacyPreview(p)),
@@ -278,6 +281,15 @@
       }
       wrap.appendChild(st);
     }
+
+    // ---- 文件年龄分布 ----
+    const ageSec = U.el('div', { class: 'd-sec' });
+    ageSec.appendChild(U.el('div', { class: 'd-sec-title' }, [
+      U.el('span', { text: '📅 文件年龄分布' }),
+      U.el('button', { class: 'mini', text: '刷新', onclick: async () => { ageSec.querySelector('.age-dist')?.remove(); await loadAgeDist(ageSec, p); } }),
+    ]));
+    await loadAgeDist(ageSec, p);
+    wrap.appendChild(ageSec);
 
     // ---- 变更历史 ----
     if (ann && ann.history && ann.history.length) {
@@ -429,7 +441,7 @@
         // 重新构造一个最小的文件行对象用于 renderFile
         renderFile({ path: p, name: U.basename(p), isDir: false, size: curProfile.size || 0, mtimeMs: curProfile.mtimeMs || 0, cat: curProfile.cat || 'other', ext: curProfile.ext || '' }, ann);
       } else {
-        render(p, curProfile, ann);
+        await render(p, curProfile, ann);
       }
     }
     Explorer.render();
@@ -477,6 +489,83 @@
       U.el('div', { class: 'k', text: k }),
       U.el('div', { class: 'v', text: String(v ?? '—') }),
     ]);
+  }
+
+  /* ---------------- 面板：空间分析 / 重复文件 / 文件预览 ---------------- */
+  async function showSpacePanel(p) {
+    const panel = U.el('div', { class: 'space-panel' });
+    const sec = U.el('div', { class: 'd-sec' });
+    sec.appendChild(U.el('div', { class: 'd-sec-title' }, [U.el('span', { text: '📊 空间占用分析' })]));
+    sec.appendChild(panel);
+    // 插入到详情面板的操作区后面
+    const body = bodyEl();
+    const existing = body.querySelector('.space-panel') || body.querySelector('.dedup-panel') || body.querySelector('.preview-panel');
+    if (existing) existing.remove();
+    body.querySelector('.d-sec:last-of-type')?.after(sec) || body.appendChild(sec);
+    await Panels.showSpaceAnalysis(p, panel);
+  }
+
+  async function showDedupPanel(p) {
+    const panel = U.el('div', { class: 'dedup-panel' });
+    const sec = U.el('div', { class: 'd-sec' });
+    sec.appendChild(U.el('div', { class: 'd-sec-title' }, [U.el('span', { text: '🔍 重复文件检测' })]));
+    sec.appendChild(panel);
+    const body = bodyEl();
+    const existing = body.querySelector('.space-panel') || body.querySelector('.dedup-panel') || body.querySelector('.preview-panel');
+    if (existing) existing.remove();
+    body.appendChild(sec);
+    await Panels.showDedupResults(p, panel);
+  }
+
+  async function showPreviewPanel(p) {
+    const panel = U.el('div', { class: 'preview-panel' });
+    const sec = U.el('div', { class: 'd-sec' });
+    sec.appendChild(U.el('div', { class: 'd-sec-title' }, [U.el('span', { text: '👁️ 文件预览' })]));
+    sec.appendChild(panel);
+    const body = bodyEl();
+    const existing = body.querySelector('.preview-panel') || body.querySelector('.space-panel') || body.querySelector('.dedup-panel');
+    if (existing) existing.remove();
+    // 插到文件信息之前
+    const fileInfoSec = Array.from(body.querySelectorAll('.d-sec')).find((s) => s.textContent.includes('文件信息'));
+    if (fileInfoSec) fileInfoSec.before(sec); else body.appendChild(sec);
+    await Panels.showPreview(p, panel);
+  }
+
+  async function loadAgeDist(container, dirPath) {
+    const distWrap = U.el('div', { class: 'age-dist' });
+    container.appendChild(distWrap);
+
+    let data;
+    try { data = await U.call('ageDistribution', dirPath); } catch { return; }
+    if (!data || !data.buckets) return;
+
+    const { buckets, total } = data;
+    if (total === 0) {
+      distWrap.innerHTML = '<div style="color:var(--text-faint);font-size:12px">该文件夹下没有可统计的文件</div>';
+      return;
+    }
+
+    const BUCKET_LABELS = [
+      { key: 'week', label: '本周内', cls: 'age-recent' },
+      { key: 'month', label: '本月内', cls: 'age-recent' },
+      { key: 'quarter', label: '3个月内', cls: 'age-ok' },
+      { key: 'half', label: '半年内', cls: 'age-old' },
+      { key: 'older', label: '半年前', cls: 'age-ancient' },
+    ];
+
+    const bars = U.el('div', { class: 'age-bars' });
+    for (const b of BUCKET_LABELS) {
+      const count = buckets[b.key] || 0;
+      const pct = total > 0 ? ((count / total) * 100).toFixed(1) : 0;
+      bars.appendChild(U.el('div', { class: 'age-row' }, [
+        U.el('span', { class: 'age-label', text: b.label }),
+        U.el('div', { class: 'age-bar-wrap' }, [
+          U.el('div', { class: 'age-bar ' + b.cls, style: { width: Math.max(pct, count > 0 ? 2 : 0) + '%' } }),
+        ]),
+        U.el('span', { class: 'age-count', text: String(count) }),
+      ]));
+    }
+    distWrap.appendChild(bars);
   }
 
   window.Detail = Detail;

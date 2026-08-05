@@ -73,7 +73,10 @@
     <!-- 左侧 -->
     <aside class="sidebar">
       <nav class="nav">
-        <button class="nav-item active" data-view="browse">
+        <button class="nav-item active" data-view="home">
+          <svg class="ic"><use href="#i-home"/></svg><span data-i18n="nav.home">首页</span>
+        </button>
+        <button class="nav-item" data-view="browse">
           <svg class="ic"><use href="#i-tree"/></svg><span data-i18n="nav.browse">浏览文件夹</span>
         </button>
         <button class="nav-item" data-view="tags">
@@ -114,6 +117,11 @@
 
     <!-- 中间 -->
     <section class="content">
+      <!-- 仪表盘首页 -->
+      <div class="view active" id="view-home">
+        <div class="dashboard" id="dashboard"></div>
+      </div>
+
       <!-- 浏览视图 -->
       <div class="view active" id="view-browse">
         <div class="toolbar">
@@ -160,6 +168,9 @@
           <button class="btn sm" id="btnBulkRetag">重新生成</button>
           <button class="btn sm" id="btnBulkAddTag">添加标签</button>
           <label class="chk"><input type="checkbox" id="bulkRecursive"><span>递归子项</span></label>
+          <button class="btn ghost sm btn-bulk-op" id="btnBulkMove">移动到…</button>
+          <button class="btn ghost sm btn-bulk-op" id="btnBulkCopy">复制到…</button>
+          <button class="btn danger sm btn-bulk-op" id="btnBulkTrash">删除（回收站）</button>
           <button class="btn ghost sm" id="btnBulkClear">取消选择</button>
         </div>
 
@@ -237,6 +248,9 @@
 <script src="js/tagsview.js"></script>
 <script src="js/settings.js"></script>
 <script src="js/butler.js"></script>
+<script src="js/onboarding.js"></script>
+<script src="js/panels.js"></script>
+<script src="js/dashboard.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

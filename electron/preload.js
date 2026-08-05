@@ -13,8 +13,19 @@ const INVOKE = [
 
   'fs:roots', 'fs:list', 'fs:profile', 'fs:reveal', 'fs:open',
   'fs:pickFolder', 'fs:clearCache', 'fs:cacheStats',
+  'fs:preview', 'fs:move', 'fs:copy', 'fs:trash',
 
   'index:summary', 'index:scan', 'index:cancel', 'index:search', 'index:clear',
+
+  'size:scan',
+
+  'age:distribution',
+
+  'dedup:scan',
+
+  'favorites:get', 'favorites:add', 'favorites:remove',
+
+  'scheduler:status', 'scheduler:toggle',
 
   'lib:tags', 'lib:createTag', 'lib:updateTag', 'lib:deleteTag',
   'lib:categories', 'lib:upsertCategory', 'lib:deleteCategory',
@@ -29,7 +40,7 @@ const INVOKE = [
   'relink:verify', 'relink:apply',
 ];
 
-const EVENTS = ['index:progress', 'tag:progress', 'app:toast'];
+const EVENTS = ['index:progress', 'tag:progress', 'app:toast', 'cli:openPath'];
 
 const api = {};
 for (const ch of INVOKE) {

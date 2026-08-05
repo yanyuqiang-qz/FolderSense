@@ -14,6 +14,7 @@
     }
 
     App.applySettings();
+    Dash.init();
     Explorer.init();
     Butler.init();
     bindUI();
@@ -48,6 +49,16 @@
     }, 1500);
 
     updateStatus();
+
+    // 首次使用引导
+    Onboarding.checkAndShow();
+
+    // 处理命令行参数（如从资源管理器右键启动）
+    window.api.on('cli:openPath', (p) => {
+      App.switchView('browse');
+      Explorer.openDir(p);
+      Detail.show(p);
+    });
   };
 
   App.applySettings = function () {
@@ -67,6 +78,29 @@
     S.roots = r;
     const box = U.$('#placesList');
     box.replaceChildren();
+
+    // 收藏夹
+    const favs = (S.settings.favorites || []);
+    if (favs.length) {
+      const favSection = U.el('div', { class: 'fav-section' });
+      favSection.appendChild(U.el('div', { class: 'fav-title' }, [
+        U.el('span', { text: '⭐ 收藏夹' }),
+      ]));
+      for (const fp of favs) {
+        const name = fp.split(/[/\\]/).pop() || fp;
+        favSection.appendChild(U.el('div', { class: 'fav-item' + (S.cwd === fp ? ' active' : ''), title: fp, onclick: () => { App.switchView('browse'); Explorer.openDir(fp); } }, [
+          U.el('span', { class: 'fav-star', text: '★' }),
+          U.el('span', { class: 'fav-name', text: name }),
+          U.el('button', { class: 'fav-remove', text: '×', title: '取消收藏', onclick: async (e) => {
+            e.stopPropagation();
+            await U.safeCall('favoritesRemove', fp);
+            S.settings = await U.call('settingsGet');
+            App.loadPlaces();
+          } }),
+        ]));
+      }
+      box.appendChild(favSection);
+    }
 
     const add = (item, custom) => {
       const row = U.el('div', {
@@ -102,6 +136,7 @@
     U.$$('.view').forEach((v) => v.classList.toggle('active', v.id === 'view-' + name));
     if (name === 'settings') SettingsView.render();
     if (name === 'tags') Tags.runFilter();
+    if (name === 'home') Dash.init();
   };
 
   /* ---------------- 索引 ---------------- */
@@ -286,6 +321,11 @@
     U.$('#btnBulkClear').addEventListener('click', () => Explorer.clearChecked());
     U.$('#btnBulkAddTag').addEventListener('click', bulkAddTag);
 
+    // 批量文件操作
+    U.$('#btnBulkMove').addEventListener('click', () => bulkOp('move'));
+    U.$('#btnBulkCopy').addEventListener('click', () => bulkOp('copy'));
+    U.$('#btnBulkTrash').addEventListener('click', () => bulkOp('trash'));
+
     // 快捷键
     document.addEventListener('keydown', (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); gs.focus(); gs.select(); }
@@ -328,6 +368,34 @@
     Explorer.render();
     App.updateStatus();
     U.toast(`已给 ${n} 个文件夹添加标签「${name}」`, 'ok');
+  }
+
+  async function bulkOp(op) {
+    const paths = [...S.checked];
+    if (!paths.length) return;
+    if (op === 'trash') {
+      if (!(await U.confirm('移到回收站', `将把 <b>${paths.length}</b> 个项目移到回收站（可从回收站恢复）。<br>此操作不可撤销。`, true))) return;
+      const r = await U.safeCall('fsTrash', paths);
+      if (r) {
+        const ok = r.filter((x) => x.ok).length;
+        const fail = r.length - ok;
+        Explorer.clearChecked();
+        Explorer.refreshCurrent();
+        U.toast(`已移到回收站：${ok} 个` + (fail ? `，失败 ${fail} 个` : ''), fail ? 'warn' : 'ok');
+      }
+      return;
+    }
+    // move / copy: 先选目标目录
+    const dest = await U.safeCall('fsPickFolder');
+    if (!dest) return;
+    const action = op === 'move' ? '移动' : '复制';
+    const r = await U.safeCall(op === 'move' ? 'fsMove' : 'fsCopy', paths, dest);
+    if (r) {
+      const ok = r.filter((x) => x.ok).length;
+      const fail = r.length - ok;
+      if (op === 'move') { Explorer.refreshCurrent(); Explorer.clearChecked(); }
+      U.toast(`${action}完成：${ok} 个` + (fail ? `，失败 ${fail} 个` : ''), fail ? 'warn' : 'ok');
+    }
   }
 
   window.App = App;

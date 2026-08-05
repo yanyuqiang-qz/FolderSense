@@ -8,8 +8,21 @@ const { Library } = require('./core/library');
 const { Indexer } = require('./core/indexer');
 const { TagJobRunner } = require('./core/tagJob');
 const { registerIpc } = require('./ipc');
+const notifier = require('./core/notifier');
+const scheduler = require('./core/scheduler');
 
 const isDev = process.argv.includes('--dev');
+
+// 支持命令行参数：FolderSense.exe analyze "C:\path" 直接打开指定路径
+const CLI_ARGS = process.argv.slice(1).filter((a) => !a.startsWith('--'));
+/** @type {string|null} 要在窗口就绪后打开的路径 */
+let cliOpenPath = null;
+for (const arg of CLI_ARGS) {
+  // 跳过非路径参数
+  if (arg === 'analyze' || arg === 'scan') continue;
+  const fs = require('fs');
+  try { if (fs.statSync(arg)?.isDirectory()) { cliOpenPath = arg; break; } } catch { /* not a path */ }
+}
 
 /** @type {BrowserWindow|null} */
 let win = null;
@@ -35,6 +48,21 @@ if (!app.requestSingleInstanceLock()) {
   });
 }
 
+/**
+ * 根据设置启动/停止定时扫描任务
+ */
+function applySchedulerSettings(sched) {
+  if (!sched || !sched.enabled) { scheduler.cancelAll(); return; }
+  const intervalMs = (sched.intervalHours || 24) * 3600000;
+  scheduler.schedule('auto-scan', async () => {
+    const roots = ctx.settings.all().scan?.roots;
+    if (!roots || !roots.length || ctx.indexer?.isScanning) return;
+    console.log('[Scheduler] 开始定时自动扫描');
+    const r = ctx.indexer.startScan(roots, ctx.settings.all().scan);
+    if (r.ok) notifier.scanComplete({ mode: 'scheduled' });
+  }, intervalMs);
+}
+
 async function bootstrap() {
   initDataRoot(app);
 
@@ -46,7 +74,11 @@ async function bootstrap() {
 
   ctx.indexer = new Indexer();
   await ctx.indexer.init();
-  ctx.indexer.onProgress = (p) => ctx.send('index:progress', p);
+  ctx.indexer.onProgress = (p) => {
+    ctx.send('index:progress', p);
+    // 扫描完成时发通知
+    if (p.type === 'finished') notifier.scanComplete(p.summary);
+  };
 
   ctx.jobs = new TagJobRunner({
     settingsRef: () => ctx.settings,
@@ -55,6 +87,10 @@ async function bootstrap() {
   });
 
   registerIpc(ctx, () => win);
+
+  // 监听设置页对定时任务的变更
+  const { ipcMain } = require('electron');
+  ipcMain.on('scheduler:settings-changed', (_e, config) => applySchedulerSettings(config));
 }
 
 function createWindow() {
@@ -78,6 +114,10 @@ function createWindow() {
   win.once('ready-to-show', () => {
     win.show();
     if (isDev) win.webContents.openDevTools({ mode: 'detach' });
+    // 处理命令行参数：打开指定路径
+    if (cliOpenPath) {
+      win.webContents.send('cli:openPath', cliOpenPath);
+    }
   });
 
   win.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
@@ -102,6 +142,9 @@ app.whenReady().then(async () => {
   session.defaultSession.setPermissionRequestHandler((_wc, _perm, cb) => cb(false));
 
   await bootstrap();
+  notifier.applySettings(ctx.settings.all().notifications);
+  // 启动定时自动扫描任务
+  applySchedulerSettings(ctx.settings.all().scheduler);
   createWindow();
 
   app.on('activate', () => {
@@ -119,6 +162,7 @@ app.on('before-quit', async (e) => {
   e.preventDefault();
   try {
     ctx.indexer?.cancelScan();
+    scheduler.cancelAll();
     await Promise.all([
       ctx.settings?.flush(),
       ctx.library?.flush(),

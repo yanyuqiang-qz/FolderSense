@@ -8,6 +8,8 @@ const fsp = require('node:fs/promises');
 
 const scanner = require('./core/scanner');
 const ai = require('./core/ai');
+const sizeScanner = require('./core/sizeScanner');
+const scheduler = require('./core/scheduler');
 const { verifyAndRelink } = require('./core/relink');
 const { DEFAULTS } = require('./core/settings');
 
@@ -301,6 +303,168 @@ function registerIpc(ctx, getWin) {
     if (!(await scanner.exists(n))) throw new Error('目标文件夹不存在');
     return library.relink(o, n, 'manual');
   });
+
+  // ---------------- 空间分析 ----------------
+  H('size:scan', async (dirPath) => {
+
+  // ---------------- 年龄分布 ----------------
+  H('age:distribution', async (dirPath) => {
+    const p = scanner.normalize(requireString(dirPath, 'dirPath'));
+    const s = settings.all();
+    const profile = await scanner.buildProfile(p, s);
+    // 如果 profile 里没有文件级 mtime 数据，快速扫描一层
+    const buckets = { week: 0, month: 0, quarter: 0, half: 0, older: 0 };
+    const now = Date.now();
+    const WEEK = 7 * 86400000;
+    const MONTH = 30 * 86400000;
+    try {
+      const entries = await fsp.readdir(p, { withFileTypes: true });
+      for (const ent of entries) {
+        if (!ent.name.startsWith('.') && ent.isFile()) {
+          try {
+            const stat = await fsp.stat(path.join(p, ent.name));
+            const age = now - stat.mtimeMs;
+            if (age < WEEK) buckets.week++;
+            else if (age < MONTH) buckets.month++;
+            else if (age < MONTH * 3) buckets.quarter++;
+            else if (age < MONTH * 6) buckets.half++;
+            else buckets.older++;
+          } catch { /* skip */ }
+        }
+      }
+    } catch { /* skip */ }
+    return { buckets, total: Object.values(buckets).reduce((a, b) => a + b, 0), dirName: path.basename(p) };
+  });
+
+  // ---------------- 文件预览 ----------------
+    const p = scanner.normalize(requireString(dirPath, 'dirPath'));
+    const controller = new AbortController();
+    // 设置超时（5分钟）
+    const timer = setTimeout(() => controller.abort(), 300000);
+    try {
+      const result = await sizeScanner.scanSize(p, {
+        signal: controller.signal,
+        maxDepth: settings.all().scan?.maxDepth || 10,
+      });
+      // 只返回前 N 个目录和文件（避免传输过大）
+      return {
+        dirs: result.dirs.slice(0, 200),
+        files: result.files.slice(0, sizeScanner.DEFAULT_TOP_N),
+        totalDirs: result.dirs.length,
+        totalFiles: result.files.length,
+        totalSize: result.totalSize,
+        treemap: sizeScanner.buildTreemapData(result.dirs.slice(0, 50)),
+      };
+    } finally { clearTimeout(timer); }
+  });
+
+  // ---------------- 文件预览 ----------------
+  H('fs:preview', async (filePath) => {
+    const p = scanner.normalize(requireString(filePath, 'filePath'));
+    const MAX_BYTES = 4096; // 只读前 4KB
+    try {
+      const stat = await fsp.stat(p);
+      if (!stat.isFile()) throw new Error('不是文件');
+      const ext = path.extname(p).toLowerCase();
+      // 图片：返回 base64 缩略图信息
+      if (/\.(png|jpe?g|gif|bmp|webp|ico|svg)$/i.test(ext)) {
+        const buf = await fsp.readFile(p);
+        return { type: 'image', ext, size: stat.size, data: `data:${mimeFromExt(ext)};base64,${buf.toString('base64').slice(0, 100)}...`, isTruncated: true };
+      }
+      // 文本/代码
+      if (/\.(txt|md|csv|log|json|xml|html?|css|js|ts|py|java|c(cpp|h)?|go|rs|sh|bat|ps1|yml|yaml|toml|ini|cfg|conf)$/i.test(ext)) {
+        const buf = await fsp.readFile(p, { encoding: 'utf-8' });
+        const text = buf.slice(0, MAX_BYTES);
+        return { type: 'text', ext, size: stat.size, content: text, isTruncated: buf.length > MAX_BYTES };
+      }
+      // 其它格式只返回元信息
+      return { type: 'binary', ext, size: stat.size, previewable: false };
+    } catch (e) {
+      return { error: e.message, previewable: false };
+    }
+  });
+
+  // ---------------- 批量文件操作 ----------------
+  H('fs:move', async (paths, destDir) => {
+    const dest = scanner.normalize(requireString(destDir, 'destDir'));
+    if (!(await scanner.exists(dest))) throw new Error('目标文件夹不存在');
+    const results = [];
+    for (const src of paths) {
+      const s = scanner.normalize(src);
+      const fileName = path.basename(s);
+      const target = path.join(dest, fileName);
+      try { await fsp.rename(s, target); results.push({ from: s, to: target, ok: true }); }
+      catch (e) { results.push({ from: s, to: target, ok: false, error: e.message }); }
+    }
+    return results;
+  });
+
+  H('fs:copy', async (paths, destDir) => {
+    const dest = scanner.normalize(requireString(destDir, 'destDir'));
+    if (!(await scanner.exists(dest))) throw new Error('目标文件夹不存在');
+    const results = [];
+    for (const src of paths) {
+      const s = scanner.normalize(src);
+      const fileName = path.basename(s);
+      const target = path.join(dest, fileName);
+      try { await fsp.copyFile(s, target); results.push({ from: s, to: target, ok: true }); }
+      catch (e) { results.push({ from: s, to: target, ok: false, error: e.message }); }
+    }
+    return results;
+  });
+
+  H('fs:trash', async (paths) => {
+    const results = [];
+    for (const src of paths) {
+      const s = scanner.normalize(src);
+      try { await shell.trashItem(s); results.push({ path: s, ok: true }); }
+      catch (e) { results.push({ path: s, ok: false, error: e.message }); }
+    }
+    return results;
+  });
+
+  // ---------------- 收藏夹 ----------------
+  H('favorites:get', async () => settings.all().favorites || []);
+
+  H('favorites:add', async (p) => {
+    const favPath = scanner.normalize(requireString(p, 'path'));
+    const favs = [...(settings.all().favorites || [])];
+    if (!favs.includes(favPath)) {
+      favs.unshift(favPath);
+      await settings.patch({ favorites: favs });
+      await settings.flush();
+    }
+    return settings.all().favorites || [];
+  });
+
+  H('favorites:remove', async (p) => {
+    const favPath = scanner.normalize(requireString(p, 'path'));
+    const favs = (settings.all().favorites || []).filter((x) => x !== favPath);
+    await settings.patch({ favorites: favs.length ? favs : undefined });
+    await settings.flush();
+    return settings.all().favorites || [];
+  });
+
+  // ---------------- 重复文件检测 ----------------
+  H('dedup:scan', async (dirPath) => {
+    const p = scanner.normalize(requireString(dirPath, 'dirPath'));
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 600000); // 10分钟超时
+    return dedupScan(p, controller.signal);
+  });
+
+  // ---------------- 定时任务调度器 ----------------
+  H('scheduler:status', async () => scheduler.status());
+
+  H('scheduler:toggle', async (config) => {
+    if (!config || typeof config !== 'object') throw new Error('参数无效');
+    settings.patch({ scheduler: config });
+    await settings.flush();
+    // 通知 main.js 重新应用调度器设置（通过事件让 main 层处理）
+    const { ipcMain } = require('electron');
+    ipcMain.emit('scheduler:settings-changed', config);
+    return settings.all().scheduler;
+  });
 }
 
 /** 给检索结果补上名称、是否存在、注记视图 */
@@ -315,6 +479,72 @@ function decorate(paths, library) {
       status: v?.status || 'ok',
     };
   }).sort((a, b) => a.name.localeCompare(b.name, 'zh-Hans-CN'));
+}
+
+/** 扩展名到 MIME 的简单映射 */
+function mimeFromExt(ext) {
+  const map = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml' };
+  return map[ext.toLowerCase()] || 'application/octet-stream';
+}
+
+/**
+ * 重复文件检测：按大小初筛 → SHA256 比对
+ */
+async function dedupScan(dirPath, signal) {
+  const crypto = require('crypto');
+  const fs2 = require('fs');
+
+  // 第一步：收集所有文件及其大小
+  const sizeMap = new Map(); // size -> [{path,name}]
+  async function collect(dir) {
+    if (signal?.aborted) throw new Error('cancelled');
+    let entries;
+    try { entries = await fsp.readdir(dir, { withFileTypes: true }); } catch { return; }
+    for (const ent of entries) {
+      if (signal?.aborted) throw new Error('cancelled');
+      if (!ent.name.startsWith('.') && ent.isFile()) {
+        const fp = path.join(dir, ent.name);
+        try {
+          const stat = await fsp.stat(fp);
+          const arr = sizeMap.get(stat.size) || [];
+          arr.push({ path: fp, name: ent.name });
+          sizeMap.set(stat.size, arr);
+        } catch { /* skip */ }
+      } else if (ent.isDirectory() && !ent.name.startsWith('.') && ent.name !== '$RECYCLE.BIN' && ent.name !== 'System Volume Information') {
+        await collect(path.join(dir, ent.name));
+      }
+    }
+  }
+  await collect(dirPath);
+
+  // 第二步：只对有相同大小的文件组做哈希比对
+  const groups = [];
+  for (const [size, files] of sizeMap) {
+    if (files.length < 2) continue;
+    if (signal?.aborted) throw new Error('cancelled');
+    const hashMap = new Map();
+    for (const f of files) {
+      if (signal?.aborted) throw new Error('cancelled');
+      try {
+        const hash = crypto.createHash('sha256');
+        const stream = fs2.createReadStream(f.path, { highWaterMark: 1024 * 1024 });
+        for await (const chunk of stream) hash.update(chunk);
+        const digest = hash.digest('hex').slice(0, 16); // 取前16位够用了
+        const arr = hashMap.get(digest) || [];
+        arr.push(f);
+        hashMap.set(digest, arr);
+      } catch { /* skip unreadable */ }
+    }
+    for (const [hash, dups] of hashMap) {
+      if (dups.length >= 2) {
+        groups.push({ hash, files: dups, size });
+      }
+    }
+  }
+
+  // 按浪费空间排序（每组总大小 - 保留一份）
+  groups.sort((a, b) => (b.size * (b.files.length - 1)) - (a.size * (a.files.length - 1)));
+  return { groups, totalGroups: groups.length, totalWastedBytes: groups.reduce((s, g) => s + g.size * (g.files.length - 1), 0) };
 }
 
 module.exports = { registerIpc };

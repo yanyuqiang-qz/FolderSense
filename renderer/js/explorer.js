@@ -427,12 +427,21 @@
       items.push({ t: '展开 / 进入', f: () => Explorer.activate(r) });
       items.push({ t: 'AI 生成标签', f: () => Detail.analyze(r.path, true) });
       items.push({ t: '递归分析子项', f: () => Detail.analyzeRecursive(r.path) });
+      const isFav = (S.settings.favorites || []).includes(r.path);
+      items.push({ t: isFav ? '★ 取消收藏' : '☆ 固定到收藏夹', f: async () => {
+        if (isFav) await U.safeCall('favoritesRemove', r.path); else await U.safeCall('favoritesAdd', r.path);
+        S.settings = await U.call('settingsGet');
+        App.loadPlaces();
+      }});
+      items.push({ t: '空间占用分析', f: () => { Detail.show(r.path); setTimeout(() => { const btn = document.querySelector('.d-actions button:nth-child(5)'); if (btn) btn.click(); }, 100); }});
+      items.push({ t: '查找重复文件', f: () => { Detail.show(r.path); setTimeout(() => { const btn = document.querySelector('.d-actions button:nth-child(6)'); if (btn) btn.click(); }, 100); }});
       items.push({ t: r.path && S.checked.has(r.path) ? '取消勾选' : '勾选（批量操作）', f: () => {
         if (S.checked.has(r.path)) S.checked.delete(r.path); else S.checked.add(r.path);
         renderWindow(true); updateBulkBar();
       } });
     } else {
       items.push({ t: '打开文件', f: () => U.safeCall('fsOpen', r.path) });
+      items.push({ t: '预览文件', f: () => { Detail.showFile(r); setTimeout(() => { const btn = document.querySelector('.d-actions button:nth-child(2)'); if (btn) btn.click(); }, 100); }});
     }
     items.push({ t: '在文件管理器中显示', f: () => U.safeCall('fsReveal', r.path) });
     items.push({ t: '复制完整路径', f: () => U.copy(r.path) });
