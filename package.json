@@ -42,13 +42,13 @@
       "target": [
         "nsis",
         "portable"
-      ],
-      "nsis": {
-        "include": "installer/nsis-context-menu.nsh",
-        "oneClick": false,
-        "allowToChangeInstallationDirectory": true,
-        "perMachine": false
-      }
+      ]
+    },
+    "nsis": {
+      "include": "installer/nsis-context-menu.nsh",
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false
     },
     "mac": {
       "target": [
