@@ -4,7 +4,10 @@
   "version": "0.1.0",
   "description": "本地文件夹 AI 语义标签与管理工具（中文优先，跨平台桌面应用）",
   "main": "electron/main.js",
-  "author": "FolderSense",
+  "author": {
+    "name": "FolderSense",
+    "email": "foldersense@example.com"
+  },
   "license": "MIT",
   "private": true,
   "scripts": {
@@ -25,7 +28,11 @@
     "directories": {
       "output": "dist"
     },
-    "asar": false,
+    "asar": true,
+    "asarUnpack": [
+      "electron/core/**/*"
+    ],
+    "publish": false,
     "files": [
       "electron/**/*",
       "renderer/**/*",
@@ -42,7 +49,8 @@
         "dmg",
         "zip"
       ],
-      "category": "public.app-category.utilities"
+      "category": "public.app-category.utilities",
+      "identity": null
     },
     "linux": {
       "target": [

@@ -105,4 +105,17 @@ git tag v0.1.0 && git push origin v0.1.0
 ```
 
 **Q：worker 加载报错（asar）？**
-A：已在 `package.json` 关掉 `asar`（worker_threads 需按真实路径加载 `indexWorker.js`），CI 直接复用该配置，无需额外处理。
+A：已采用推荐做法——`package.json` 中 `asar: true` + `asarUnpack: ["electron/core/**/*"]`，把 worker 及其依赖解包成真实文件，`indexer.js` 会自动把 `app.asar/...` 映射到 `app.asar.unpacked/...` 供 `worker_threads` 加载，无需关闭 asar。
+
+---
+
+## ⑥ 构建前置要求（已写入仓库，照做即可）
+
+以下三点已直接在 `package.json` 配好，列出来便于排查：
+
+1. **`author` 必须带 email**：Linux 打 `.deb` 需要维护者邮箱，否则报 `Please specify author 'email'`。当前为 `{ "name": "FolderSense", "email": "foldersense@example.com" }`。
+2. **`build.publish: false`**：关闭 electron-builder 自带的 GitHub 发布（否则打 tag 时会因缺 `GH_TOKEN` 失败）。Release 由 CI 的 `release` 作业用 `softprops/action-gh-release` 上传产物，无需任何额外 Secret。
+3. **macOS `identity: null`**：当前未配证书，显式跳过 macOS 签名，产出**未签名** dmg/zip（安装时需手动放行）。日后有 Apple 开发者证书时，删掉这一行并配置 `APPLE_*` Secret 即可自动公证。
+
+> 另：`electron-builder` 会提示 “default Electron icon is used” —— 只是没设应用图标（警告，不影响构建）。想换图标可在 `build` 里加 `"icon": "build/icon.png"`。
+

@@ -12,6 +12,14 @@ const { files } = require('./paths');
 
 const INDEX_VERSION = 1;
 
+// worker_threads 需要真实文件路径。启用 asar 时，被 asarUnpack 解出的文件位于
+// app.asar.unpacked 下，这里把 app.asar/... 映射成 app.asar.unpacked/...。
+function resolveWorkerPath() {
+  const p = path.join(__dirname, 'indexWorker.js');
+  if (p.includes('.asar')) return p.replace('.asar', '.asar.unpacked');
+  return p;
+}
+
 class Indexer {
   constructor() {
     this.store = new JsonStore(files.index(), {
@@ -71,7 +79,7 @@ class Indexer {
     const existing = [...this.map.values()];
     const t0 = Date.now();
 
-    this.worker = new Worker(path.join(__dirname, 'indexWorker.js'), {
+    this.worker = new Worker(resolveWorkerPath(), {
       workerData: { roots, scan: scanSettings, existing },
     });
 
