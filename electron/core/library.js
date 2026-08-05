@@ -325,6 +325,27 @@ class Library {
     return Object.keys(this.ann.get().items);
   }
 
+  /**
+   * 导出供「AI 文件管家」检索用的精简清单。
+   * 只包含名称、说明、标签、备注等元数据，绝不包含文件内容或完整路径以外的敏感信息。
+   * @returns {Array<{path,name,summary,tags:string[],note,updatedAt}>}
+   */
+  buildIndex() {
+    const tagMap = new Map(this.tags.get().items.map((t) => [t.id, t.name]));
+    const out = [];
+    for (const a of Object.values(this.ann.get().items)) {
+      out.push({
+        path: a.path,
+        name: a.name,
+        summary: a.summaryOverride || a.aiSummary,
+        tags: this.effectiveTagIds(a).map((id) => tagMap.get(id)).filter(Boolean),
+        note: a.note,
+        updatedAt: a.updatedAt || 0,
+      });
+    }
+    return out;
+  }
+
   allAnnotations() {
     return Object.values(this.ann.get().items);
   }

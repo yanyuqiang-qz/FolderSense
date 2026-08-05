@@ -15,6 +15,7 @@
 
     App.applySettings();
     Explorer.init();
+    Butler.init();
     bindUI();
     subscribeEvents();
 

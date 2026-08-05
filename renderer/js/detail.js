@@ -52,6 +52,7 @@
 
     wrap.appendChild(U.el('div', { class: 'd-actions' }, [
       btn(ann && ann.hasAi ? '重新生成' : 'AI 生成标签', 'sparkle', () => Detail.analyze(r.path, true), 'primary'),
+      btn('问 AI 管家', 'chat', () => window.Butler && window.Butler.askAbout(r.path)),
       btn('打开', 'external', () => U.safeCall('fsOpen', r.path)),
       btn('定位', null, () => U.safeCall('fsReveal', r.path)),
     ]));
@@ -170,6 +171,7 @@
     wrap.appendChild(U.el('div', { class: 'd-actions' }, [
       btn(ann && ann.hasAi ? '重新生成' : 'AI 生成标签', 'sparkle', () => Detail.analyze(p, true), 'primary'),
       btn('递归分析子项', 'sparkle', () => Detail.analyzeRecursive(p)),
+      btn('问 AI 管家', 'chat', () => window.Butler && window.Butler.askAbout(p)),
       btn('打开', 'external', () => U.safeCall('fsOpen', p)),
       btn('定位', null, () => U.safeCall('fsReveal', p)),
       btn('将发送什么？', 'shield', () => showPrivacyPreview(p)),

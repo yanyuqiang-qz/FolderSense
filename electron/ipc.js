@@ -249,6 +249,47 @@ function registerIpc(ctx, getWin) {
   H('ai:audit', async (limit) => ai.readAudit(limit || 200));
   H('ai:clearAudit', async () => ai.clearAudit());
 
+  /* ---------------- AI 文件管家（对话找文件） ---------------- */
+  H('ai:chat', async (messages) => {
+    if (!Array.isArray(messages) || !messages.length) throw new Error('消息为空');
+    const last = messages[messages.length - 1];
+    if (!last || last.role !== 'user' || !String(last.content || '').trim()) {
+      throw new Error('最后一条必须是用户消息');
+    }
+    const s = settings.all();
+    const index = library.buildIndex();
+    const candidates = ai.localRetrieve(index, last.content, 40);
+    const apiKey = settings.getApiKey();
+
+    // 离线兜底：没开启 AI 或没填 Key 时，用本地关键词直接回答
+    if (!s.ai.enabled || !apiKey) {
+      return { source: 'local', answer: ai.localAnswer(last.content, candidates), matches: candidates.slice(0, 12) };
+    }
+
+    const history = messages.slice(0, -1)
+      .filter((m) => m.role === 'user' || m.role === 'assistant')
+      .map((m) => ({ role: m.role, content: String(m.content || '') }));
+
+    try {
+      const r = await ai.chat(last.content, history, candidates, s, apiKey);
+      const matches = [];
+      const seen = new Set();
+      for (const n of r.matchIndices || []) {
+        const i = Number(n) - 1;
+        if (i >= 0 && i < candidates.length && !seen.has(i)) { seen.add(i); matches.push(candidates[i]); }
+      }
+      if (!matches.length && candidates.length) matches.push(...candidates.slice(0, 3));
+      return { source: 'remote', answer: r.answer, matches: matches.slice(0, 8) };
+    } catch (e) {
+      // 远程失败也别让用户空手而归：退回本地关键词结果
+      return {
+        source: 'local-fallback',
+        answer: `AI 暂时连不上（${e.message}）。不过我用本地记录帮你找到了这些可能相关的文件，你看看是不是：`,
+        matches: candidates.slice(0, 12),
+      };
+    }
+  });
+
   // ---------------- 标签跟随 ----------------
   H('relink:verify', async () => verifyAndRelink({
     library, indexer, settingsRef: () => settings,

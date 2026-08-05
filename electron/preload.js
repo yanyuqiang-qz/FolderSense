@@ -24,7 +24,7 @@ const INVOKE = [
   'lib:export', 'lib:import', 'lib:listAnnotated',
 
   'ai:preview', 'ai:analyzeOne', 'ai:batch', 'ai:cancel', 'ai:status',
-  'ai:audit', 'ai:clearAudit',
+  'ai:audit', 'ai:clearAudit', 'ai:chat',
 
   'relink:verify', 'relink:apply',
 ];

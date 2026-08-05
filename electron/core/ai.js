@@ -92,17 +92,124 @@ function formatSize(n) {
   return `${v.toFixed(v >= 100 || i === 0 ? 0 : 1)} ${u[i]}`;
 }
 
+// ---------------- AI 文件管家（对话找文件） ----------------
+const BUTLER_SYSTEM_PROMPT = `你是用户的「本地文件管家」。用户的电脑里很多文件/文件夹都已经有了一句话说明和标签，整理在下面的「已知文件清单」里（只含名称、说明、标签，**不含文件内容，也不含完整磁盘路径**）。
+
+你的任务：用简体中文、像真人助手一样，回答用户关于“某个文件/文件夹在哪、是干嘛的”这类问题。例如：
+- “我的合同放在哪？”
+- “上次旅游的照片在哪个文件夹？”
+- “和工作有关的文档都在哪里？”
+
+规则：
+1. 只能依据「已知文件清单」回答，绝对不要编造清单里没有的文件或路径。
+2. 回答要口语化、面向不懂电脑的普通用户，避免英文术语；提到文件时直接用清单里的「名称」。
+3. 如果用户问“在哪”，明确告诉他在哪个文件夹/文件，并引用清单里的编号（如“见第 3 条”）。
+4. 如果清单里找不到，就老实说“在你的文件说明里没有找到相关记录”，并建议他先对那个文件所在的文件夹做一次「AI 分析」。
+5. 最后务必以 JSON 输出：{"answer":"你的口语化回答","matchIndices":[相关条目的编号数组，编号从 1 开始，最多 8 个；没有就为 []]}。
+
+只输出 JSON，不要输出任何解释性文字或 Markdown 代码块。`;
+
+/** 把候选清单拼成给模型看的文本（不含完整路径，保护隐私） */
+function buildButlerPayload(candidates) {
+  const lines = candidates.map((c, i) => {
+    const parts = [`[${i + 1}] 名称：${c.name}`];
+    if (c.summary) parts.push(`说明：${c.summary}`);
+    if (c.tags && c.tags.length) parts.push(`标签：${c.tags.join('、')}`);
+    if (c.note) parts.push(`备注：${c.note}`);
+    return parts.join('\n    ');
+  });
+  return '已知文件清单（共 ' + candidates.length + ' 条）：\n' + lines.join('\n') + '\n';
+}
+
+/**
+ * 本地关键词预检索：从索引里挑出和提问最相关的若干条。
+ * 中文没有空格，用「标点切分 + 2 字滑动窗口（bigram）」生成检索词，
+ * 既能命中“合同”这种短词，也能让“旅游照片”命中标签里带“旅游”“照片”的条目。
+ */
+function queryTokens(q) {
+  const toks = [];
+  const splitRe = /[\s,，。、;；:：!！?？()（）'""]+/;
+  for (const t of q.split(splitRe).map((s) => s.trim()).filter(Boolean)) {
+    toks.push({ t: t.toLowerCase(), w: 3 });
+  }
+  const clean = q.toLowerCase().replace(splitRe, '');
+  if (clean.length >= 2) {
+    for (let i = 0; i < clean.length - 1; i++) toks.push({ t: clean.slice(i, i + 2), w: 2 });
+  }
+  if (clean.length > 0 && clean.length <= 8) toks.push({ t: clean, w: 4 });
+  return toks;
+}
+
+function localRetrieve(index, query, k) {
+  const q = String(query || '').trim();
+  if (!index.length) return [];
+  if (!q) {
+    return index.slice().sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)).slice(0, k);
+  }
+  const toks = queryTokens(q);
+  const scored = index.map((item) => {
+    const name = (item.name || '').toLowerCase();
+    const summary = (item.summary || '').toLowerCase();
+    const tags = (item.tags || []).join(' ').toLowerCase();
+    const note = (item.note || '').toLowerCase();
+    const hay = [name, summary, tags, note];
+    let score = 0;
+    for (const { t, w } of toks) {
+      if (!t) continue;
+      for (const h of hay) {
+        if (h.includes(t)) { score += w; break; }
+      }
+    }
+    return { item, score };
+  });
+  scored.sort((a, b) => b.score - a.score);
+  let top = scored.filter((s) => s.score > 0).slice(0, k);
+  if (top.length < 8) {
+    const seen = new Set(top.map((s) => s.item.path));
+    for (const s of scored) {
+      if (top.length >= k) break;
+      if (!seen.has(s.item.path)) { seen.add(s.item.path); top.push(s); }
+    }
+  }
+  return top.map((s) => s.item);
+}
+
+/** 离线兜底：没有 API Key 时，用本地关键词结果直接回答 */
+function localAnswer(question, candidates) {
+  const q = String(question || '').trim();
+  if (!candidates.length) {
+    return `目前我还没有记录任何文件或文件夹的说明，所以暂时不知道你的东西放在哪。\n\n你可以这样做：先用左边「浏览文件夹」找到你常找不到的那个文件夹，选中它，点「AI 生成标签」或「递归分析子项」，让我记住里面每个文件是干嘛的。之后你就能直接问我“${q || '某某文件'}放在哪”了。`;
+  }
+  const top = candidates.slice(0, 8);
+  const lines = top.map((c, i) => `${i + 1}. ${c.name}${c.summary ? ' —— ' + c.summary : ''}`).join('\n');
+  return `（未配置 AI，已用本地关键词在记录里帮你找了最相关的 ${top.length} 条）\n\n可能相关的文件/文件夹：\n${lines}\n\n点开下面的结果就能直接打开或定位文件。`;
+}
+
+/** 调用 AI 回答“文件在哪”类问题，返回 {answer, matchIndices} */
+async function chat(question, history, candidates, settings, apiKey, signal) {
+  const ai = settings.ai || {};
+  const payload = buildButlerPayload(candidates);
+  const userContent = `已知文件清单：\n${payload}\n\n用户问题：${question}\n\n请只输出 JSON（answer + matchIndices）。`;
+  const { parsed } = await callRemote(userContent, ai, apiKey, signal, BUTLER_SYSTEM_PROMPT, history || []);
+  const answer = String(parsed.answer || '').trim();
+  let matchIndices = Array.isArray(parsed.matchIndices) ? parsed.matchIndices : [];
+  matchIndices = matchIndices.map((n) => Number(n)).filter((n) => Number.isInteger(n)).slice(0, 8);
+  return { answer: answer || '（AI 没有返回说明）', matchIndices };
+}
+
 // ---------------- 远程调用 ----------------
-async function callRemote(payloadText, aiSettings, apiKey, signal) {
+async function callRemote(payloadText, aiSettings, apiKey, signal, systemPrompt, historyMsgs) {
   const base = String(aiSettings.baseUrl || '').replace(/\/+$/, '');
   const url = `${base}/chat/completions`;
+  const messages = [
+    { role: 'system', content: systemPrompt || SYSTEM_PROMPT },
+    ...(Array.isArray(historyMsgs) ? historyMsgs.map((m) => ({ role: m.role, content: m.content })) : []),
+    { role: 'user', content: payloadText },
+  ];
   const body = {
     model: aiSettings.model,
     temperature: aiSettings.temperature ?? 0.2,
-    messages: [
-      { role: 'system', content: SYSTEM_PROMPT },
-      { role: 'user', content: payloadText },
-    ],
+    messages,
   };
   // 优先要求结构化输出；部分服务不支持时会在下面兜底解析
   body.response_format = { type: 'json_object' };
@@ -403,4 +510,5 @@ async function listModels(settings, apiKey) {
 module.exports = {
   analyze, buildPayload, heuristic, testConnection, listModels,
   appendAudit, readAudit, clearAudit, formatSize, PROMPT_VERSION, SYSTEM_PROMPT,
+  chat, localRetrieve, localAnswer, BUTLER_SYSTEM_PROMPT,
 };
