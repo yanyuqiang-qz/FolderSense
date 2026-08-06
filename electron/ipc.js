@@ -11,7 +11,7 @@ const ai = require('./core/ai');
 const sizeScanner = require('./core/sizeScanner');
 const scheduler = require('./core/scheduler');
 const { verifyAndRelink } = require('./core/relink');
-const { DEFAULTS } = require('./core/settings');
+const { DEFAULTS, DEFAULT_EXCLUDES } = require('./core/settings');
 
 function ok(data) { return { ok: true, data }; }
 function fail(e) {
@@ -465,6 +465,18 @@ function registerIpc(ctx, getWin) {
     ipcMain.emit('scheduler:settings-changed', config);
     return settings.all().scheduler;
   });
+
+  // ---------------- 清理助手扫描 ----------------
+  H('clean:scan', async (root) => {
+    const p = scanner.normalize(requireString(root, 'root'));
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 600000); // 10分钟上限
+    try {
+      return await cleanScan(p, settings.all(), controller.signal);
+    } finally {
+      clearTimeout(controller);
+    }
+  });
 }
 
 /** 给检索结果补上名称、是否存在、注记视图 */
@@ -545,6 +557,96 @@ async function dedupScan(dirPath, signal) {
   // 按浪费空间排序（每组总大小 - 保留一份）
   groups.sort((a, b) => (b.size * (b.files.length - 1)) - (a.size * (a.files.length - 1)));
   return { groups, totalGroups: groups.length, totalWastedBytes: groups.reduce((s, g) => s + g.size * (g.files.length - 1), 0) };
+}
+
+/**
+ * 清理助手扫描：在指定根目录下寻找可清理的候选文件
+ * - 大文件（>200MB）
+ * - 老旧文件（>1 年未修改且 >10MB）
+ * - 临时/缓存/下载目录中的文件
+ * - 重复文件（>50MB 的同大小文件做 SHA256 比对）
+ */
+async function cleanScan(root, s, signal) {
+  const fs2 = require('fs');
+  const crypto = require('crypto');
+  const LARGE = 200 * 1024 * 1024;
+  const OLD_BYTES = 10 * 1024 * 1024;
+  const OLD_MS = 365 * 86400000;
+  const DUP_MIN = 50 * 1024 * 1024;
+  const MAX_FILES = 300000;
+
+  const candidates = [];
+  const sizeMap = new Map(); // size -> [path]，用于重复检测
+  const now = Date.now();
+  const yearAgo = now - OLD_MS;
+  const tempRe = /[\\/](Temp|tmp|Cache|Caches|Downloads|下载|临时文件|回收站|\$RECYCLE\.BIN|thumbnails|Thumbnails)/i;
+  let scanned = 0;
+
+  async function walk(dir, depth) {
+    if (signal?.aborted) throw new Error('cancelled');
+    if (scanned > MAX_FILES || depth > 14) return;
+    let entries;
+    try { entries = await fsp.readdir(dir, { withFileTypes: true }); } catch { return; }
+    for (const ent of entries) {
+      if (signal?.aborted) throw new Error('cancelled');
+      if (scanned > MAX_FILES) return;
+      if (ent.name.startsWith('.')) continue;
+      const fp = path.join(dir, ent.name);
+      if (ent.isDirectory()) {
+        if (DEFAULT_EXCLUDES.includes(ent.name)) continue;
+        if (s?.scan?.excludeNames?.includes(ent.name)) continue;
+        await walk(fp, depth + 1);
+      } else if (ent.isFile()) {
+        scanned++;
+        let st;
+        try { st = await fsp.stat(fp); } catch { continue; }
+        const size = st.size;
+        let category = null, reason = '';
+        if (size > LARGE) { category = 'large'; reason = '体积超过 200MB 的大文件'; }
+        else if (st.mtimeMs < yearAgo && size > OLD_BYTES) { category = 'old'; reason = '超过一年未修改'; }
+        else if (tempRe.test(fp)) { category = 'temp'; reason = '位于临时 / 缓存 / 下载目录'; }
+        if (category) candidates.push({ path: fp, name: ent.name, size, mtimeMs: st.mtimeMs, category, reason });
+        if (size > DUP_MIN) {
+          const arr = sizeMap.get(size) || [];
+          arr.push(fp);
+          sizeMap.set(size, arr);
+        }
+      }
+    }
+  }
+  await walk(root, 0);
+
+  // 重复文件检测（仅在大文件中比对，控制成本）
+  const groups = [];
+  for (const [size, files] of sizeMap) {
+    if (files.length < 2) continue;
+    if (signal?.aborted) throw new Error('cancelled');
+    const hashMap = new Map();
+    for (const fp of files) {
+      try {
+        const hash = crypto.createHash('sha256');
+        const stream = fs2.createReadStream(fp, { highWaterMark: 1024 * 1024 });
+        for await (const chunk of stream) hash.update(chunk);
+        const digest = hash.digest('hex').slice(0, 16);
+        const arr = hashMap.get(digest) || [];
+        arr.push(fp);
+        hashMap.set(digest, arr);
+      } catch { /* 跳过不可读 */ }
+    }
+    for (const [hash, dups] of hashMap) {
+      if (dups.length >= 2) {
+        groups.push({ hash, size, files: dups.map((f) => ({ path: f, name: path.basename(f) })) });
+      }
+    }
+  }
+  groups.sort((a, b) => (b.size * (b.files.length - 1)) - (a.size * (a.files.length - 1)));
+
+  const byCat = { large: [], old: [], temp: [] };
+  for (const c of candidates) byCat[c.category].push(c);
+  const totalBytes = candidates.reduce((a, c) => a + c.size, 0)
+    + groups.reduce((a, g) => a + g.size * (g.files.length - 1), 0);
+
+  return { candidates, groups, byCat, totalBytes, scanned, root };
 }
 
 module.exports = { registerIpc };

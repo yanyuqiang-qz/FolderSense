@@ -289,6 +289,7 @@
       frow('扫描完成', '索引扫描结束时通知', toggle(n.scanComplete !== false, (v) => patch({ notifications: { scanComplete: v } }))),
       frow('发现大文件', '空间分析发现超过 100MB 的文件时通知', toggle(n.largeFiles !== false, (v) => patch({ notifications: { largeFiles: v } }))),
       frow('批量打标签完成', 'AI 批量任务结束时通知', toggle(n.tagComplete !== false, (v) => patch({ notifications: { tagComplete: v } }))),
+      frow('磁盘内容变化', '自上次扫描起体积变化明显时通知', toggle(n.changeDetected !== false, (v) => patch({ notifications: { changeDetected: v } }))),
     ]);
   }
 

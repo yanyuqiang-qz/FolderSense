@@ -77,7 +77,14 @@ async function bootstrap() {
   ctx.indexer.onProgress = (p) => {
     ctx.send('index:progress', p);
     // 扫描完成时发通知
-    if (p.type === 'finished') notifier.scanComplete(p.summary);
+    if (p.type === 'finished') {
+      notifier.scanComplete(p.summary);
+      // 磁盘内容明显变化才提醒（阈值：>2GB 或相对变化 >10%）
+      const d = p.deltaBytes || 0;
+      const prev = p.prevTotalSize || 0;
+      const rel = prev ? Math.abs(d) / prev : 1;
+      if (Math.abs(d) > 2 * 1024 ** 3 || rel > 0.1) notifier.changeDetected(d);
+    }
   };
 
   ctx.jobs = new TagJobRunner({

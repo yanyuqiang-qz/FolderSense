@@ -136,12 +136,20 @@
 
     const list = U.el('div', { class: 'large-files' });
     for (const f of files) {
-      list.appendChild(U.el('div', { class: 'lf-row', title: f.path }, [
+      const row = U.el('div', { class: 'lf-row', title: f.path }, [
         U.el('span', { class: 'lf-name', text: f.name }),
         U.el('span', { class: 'lf-size', text: U.size(f.size) }),
         U.el('button', { class: 'btn ghost sm', text: '定位', onclick: (e) => { e.stopPropagation(); U.safeCall('fsReveal', f.path); } }),
         U.el('button', { class: 'btn ghost sm', text: '打开', onclick: (e) => { e.stopPropagation(); U.safeCall('fsOpen', f.path); } }),
-      ]));
+        U.el('button', { class: 'btn ghost sm danger-text', text: '删除', onclick: async (e) => {
+          e.stopPropagation();
+          if (!(await U.confirm('移入回收站', `确定把「${f.name}」(${U.size(f.size)}) 移入回收站吗？可在回收站撤销。`, true))) return;
+          const res = await U.safeCall('fsTrash', [f.path]);
+          if (res && res[0] && res[0].ok) { U.toast('已移入回收站', 'ok'); row.remove(); }
+          else U.toast('删除失败：' + (res?.[0]?.error || '未知错误'), 'err');
+        } }),
+      ]);
+      list.appendChild(row);
     }
     return list;
   }
@@ -231,22 +239,60 @@
     const header = U.el('div', { class: 'dedup-header' }, [
       U.el('b', { text: `发现 ${data.groups.length} 组重复文件` }),
       U.el('span', { text: `可释放约 ${U.size(data.totalWastedBytes)}（${wastedGB} GB）` }),
+      U.el('button', { class: 'btn sm primary', text: '一键清理（每组保留一份）', onclick: async () => {
+        if (!(await U.confirm('清理重复文件', '将把每组重复文件中除保留的一份外的其余文件移入回收站，可在回收站撤销。', true))) return;
+        let total = 0, ok = 0;
+        for (const g of data.groups) {
+          const rest = g.files.slice(1).map((f) => f.path);
+          total += rest.length;
+          const res = await U.safeCall('fsTrash', rest);
+          ok += (res || []).filter((r) => r.ok).length;
+        }
+        U.toast(`已移入回收站 ${ok}/${total} 份重复文件`, 'ok');
+        Panels.showDedupResults(dirPath, container); // 刷新
+      } }),
     ]);
 
     const list = U.el('div', { class: 'dedup-list' });
     for (const group of data.groups) {
+      // 默认保留第一份，用户可点击任意一行切换保留项
+      let keeperPath = group.files[0].path;
+
       const groupEl = U.el('div', { class: 'dedup-group' }, [
         U.el('div', { class: 'dg-head' }, [
           U.el('span', { class: 'dg-hash', text: group.hash.slice(0, 10) + '…' }),
-          U.el('span', { text: `${group.files.length} 份相同 · ${U.size(group.size)}` }),
+          U.el('span', { text: `${group.files.length} 份相同 · ${U.size(group.size)} · 点任意一行可改保留项` }),
         ]),
       ]);
+
+      const rows = [];
       for (const f of group.files) {
-        groupEl.appendChild(U.el('div', { class: 'dg-file', title: f.path }, [
+        const isKeeper = f.path === keeperPath;
+        const row = U.el('div', { class: 'dg-file' + (isKeeper ? ' keeper' : ''), title: f.path }, [
+          U.el('span', { class: 'dg-keep', text: isKeeper ? '★ 保留' : '' }),
           U.el('span', { class: 'dg-fname', text: f.name }),
           U.el('button', { class: 'btn ghost xs', text: '定位', onclick: (e) => { e.stopPropagation(); U.safeCall('fsReveal', f.path); } }),
-        ]));
+        ]);
+        row.addEventListener('click', () => {
+          keeperPath = f.path;
+          groupEl.querySelectorAll('.dg-file').forEach((r) => r.classList.remove('keeper'));
+          groupEl.querySelectorAll('.dg-keep').forEach((s) => (s.textContent = ''));
+          row.classList.add('keeper');
+          row.querySelector('.dg-keep').textContent = '★ 保留';
+        });
+        rows.push(row);
+        groupEl.appendChild(row);
       }
+
+      const cleanBtn = U.el('button', { class: 'btn sm danger', text: `删除其余 ${group.files.length - 1} 份到回收站`, onclick: async () => {
+        const rest = group.files.filter((f) => f.path !== keeperPath).map((f) => f.path);
+        if (!(await U.confirm('删除重复文件', `将把选中的 ${rest.length} 份重复文件移入回收站，保留 1 份。可在回收站撤销。`, true))) return;
+        const res = await U.safeCall('fsTrash', rest);
+        const okCount = (res || []).filter((r) => r.ok).length;
+        U.toast(`已移入回收站 ${okCount} 份`, 'ok');
+        Panels.showDedupResults(dirPath, container); // 刷新
+      } });
+      groupEl.appendChild(U.el('div', { class: 'dg-actions' }, [cleanBtn]));
       list.appendChild(groupEl);
     }
 

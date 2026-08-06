@@ -93,7 +93,11 @@ class Indexer {
       } else if (msg.type === 'result') {
         this.map.clear();
         for (const e of msg.entries) this.map.set(e.p, e);
-        this._lastStats = { ...msg.stats, elapsed: Date.now() - t0 };
+        const prevTotalSize = this._lastStats?.totalSize || 0;
+        let curTotalSize = 0;
+        for (const e of msg.entries) curTotalSize += (e.s || 0);
+        const deltaBytes = curTotalSize - prevTotalSize;
+        this._lastStats = { ...msg.stats, elapsed: Date.now() - t0, totalSize: curTotalSize };
         this.store.update((d) => {
           d.updatedAt = Date.now();
           d.roots = roots;
@@ -102,7 +106,14 @@ class Indexer {
           return d;
         });
         this.scanning = false;
-        this.onProgress?.({ type: 'finished', summary: this.summary(), stats: this._lastStats });
+        this.onProgress?.({
+          type: 'finished',
+          summary: this.summary(),
+          stats: this._lastStats,
+          deltaBytes,
+          prevTotalSize,
+          curTotalSize,
+        });
       }
     });
 

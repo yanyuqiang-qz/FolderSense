@@ -137,6 +137,7 @@
     if (name === 'settings') SettingsView.render();
     if (name === 'tags') Tags.runFilter();
     if (name === 'home') Dash.init();
+    if (name === 'clean') CleanAgent.init();
   };
 
   /* ---------------- 索引 ---------------- */

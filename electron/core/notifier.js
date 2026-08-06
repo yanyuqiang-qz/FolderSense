@@ -9,6 +9,7 @@ const NOTIF_TYPES = {
   largeFiles: 'largeFiles',           // 发现大文件
   staleFolder: 'staleFolder',         // 长时间未分析
   tagComplete: 'tagComplete',         // 批量打标签完成
+  changeDetected: 'changeDetected',   // 磁盘内容明显变化
 };
 
 /** 默认配置（可被用户设置覆盖） */
@@ -17,6 +18,7 @@ const DEFAULTS = {
   [NOTIF_TYPES.largeFiles]: true,
   [NOTIF_TYPES.staleFolder]: true,
   [NOTIF_TYPES.tagComplete]: true,
+  [NOTIF_TYPES.changeDetected]: true,
 };
 
 class Notifier {
@@ -82,6 +84,24 @@ class Notifier {
     this.send(NOTIF_TYPES.tagComplete, '批量打标签完成',
       `成功 ${result?.ok || 0}，失败 ${result?.failed || 0}。`);
   }
+
+  /** 磁盘内容明显变化 */
+  changeDetected(deltaBytes) {
+    if (!deltaBytes) return;
+    const sign = deltaBytes > 0 ? '增加了' : '减少了';
+    const abs = U_size(Math.abs(deltaBytes));
+    this.send(NOTIF_TYPES.changeDetected, '磁盘内容有变化',
+      `自上次扫描以来，索引内容${sign}约 ${abs}。打开应用可查看详情。`);
+  }
+}
+
+/** 轻量字节格式化（避免循环依赖，独立实现） */
+function U_size(n) {
+  const u = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let i = 0;
+  let v = n;
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+  return `${v.toFixed(v < 10 && i > 0 ? 1 : 0)} ${u[i]}`;
 }
 
 module.exports = new Notifier();

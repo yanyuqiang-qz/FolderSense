@@ -27,6 +27,8 @@ const INVOKE = [
 
   'scheduler:status', 'scheduler:toggle',
 
+  'clean:scan',
+
   'lib:tags', 'lib:createTag', 'lib:updateTag', 'lib:deleteTag',
   'lib:categories', 'lib:upsertCategory', 'lib:deleteCategory',
   'lib:views', 'lib:addTag', 'lib:addTagId', 'lib:removeTag', 'lib:restoreAi',
