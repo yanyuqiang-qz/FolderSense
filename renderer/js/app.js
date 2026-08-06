@@ -138,6 +138,7 @@
     if (name === 'tags') Tags.runFilter();
     if (name === 'home') Dash.init();
     if (name === 'clean') CleanAgent.init();
+    if (name === 'merge') MergeAgent.init();
   };
 
   /* ---------------- 索引 ---------------- */

@@ -377,6 +377,20 @@ function registerIpc(ctx, getWin) {
         const text = buf.slice(0, MAX_BYTES);
         return { type: 'text', ext, size: stat.size, content: text, isTruncated: buf.length > MAX_BYTES };
       }
+      // Office 文档：抽取文本预览
+      if (/\.(docx|xlsx|pptx)$/i.test(ext)) {
+        try {
+          const text = extractOfficeText(p, ext.toLowerCase());
+          if (text && text.trim()) return { type: 'text', ext, size: stat.size, content: text, isTruncated: text.length >= PREVIEW_BYTES, office: true };
+        } catch { /* 抽取失败则走下方兜底 */ }
+      }
+      // PDF：抽取文本预览
+      if (ext === '.pdf') {
+        try {
+          const text = await extractPdfText(p);
+          if (text && text.trim()) return { type: 'text', ext, size: stat.size, content: text, isTruncated: text.length >= PREVIEW_BYTES, pdf: true };
+        } catch { /* 抽取失败则走下方兜底 */ }
+      }
       // 其它格式只返回元信息
       return { type: 'binary', ext, size: stat.size, previewable: false };
     } catch (e) {
@@ -477,6 +491,84 @@ function registerIpc(ctx, getWin) {
       clearTimeout(controller);
     }
   });
+
+  // ---------------- 同名文件夹合并建议 ----------------
+  H('merge:suggest', async (root) => {
+    const p = scanner.normalize(requireString(root, 'root'));
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 600000); // 10分钟上限
+    try {
+      return await mergeSuggest(p, settings.all(), controller.signal);
+    } finally {
+      clearTimeout(controller);
+    }
+  });
+
+  H('merge:apply', async (targetPath, sourcePaths) => {
+    requireString(targetPath, 'targetPath');
+    if (!Array.isArray(sourcePaths) || !sourcePaths.length) throw new Error('未选择要合并的源文件夹');
+    return mergeApply(scanner.normalize(targetPath), sourcePaths.map((x) => scanner.normalize(x)));
+  });
+}
+
+/** 预览文本上限 */
+const PREVIEW_BYTES = 4096;
+
+/** 从 Office 文档（docx/xlsx/pptx）抽取文本，纯 JS（adm-zip 解包 XML） */
+function extractOfficeText(filePath, ext) {
+  const AdmZip = require('adm-zip');
+  const zip = new AdmZip(filePath);
+  const entries = zip.getEntries();
+  if (ext === '.docx') {
+    const e = entries.find((x) => x.entryName === 'word/document.xml');
+    if (!e) return '';
+    let xml = e.getData().toString('utf8');
+    xml = xml.replace(/<w:p[ >]/g, '\n').replace(/<\/w:p>/g, '');
+    return stripXml(xml);
+  }
+  if (ext === '.xlsx') {
+    const e = entries.find((x) => x.entryName === 'xl/sharedStrings.xml');
+    if (!e) return '';
+    const xml = e.getData().toString('utf8');
+    const texts = [...xml.matchAll(/<t[^>]*>(.*?)<\/t>/g)].map((m) => m[1]);
+    return texts.join('   ').slice(0, PREVIEW_BYTES);
+  }
+  if (ext === '.pptx') {
+    const slides = entries
+      .filter((x) => /^ppt\/slides\/slide\d+\.xml$/.test(x.entryName))
+      .sort((a, b) => a.entryName.localeCompare(b.entryName));
+    const parts = slides.map((s) => {
+      const x = s.getData().toString('utf8');
+      return [...x.matchAll(/<a:t[^>]*>(.*?)<\/a:t>/g)].map((m) => m[1]).join(' ');
+    });
+    return parts.join('\n\n').slice(0, PREVIEW_BYTES);
+  }
+  return '';
+}
+
+function stripXml(s) {
+  return s.replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/\s+/g, ' ').trim();
+}
+
+/** 从 PDF 抽取文本（pdfjs-dist legacy build，纯 JS，无原生依赖） */
+async function extractPdfText(filePath) {
+  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const data = new Uint8Array(await fsp.readFile(filePath));
+  const doc = await pdfjs.getDocument({ data, useSystemFonts: false, disableFontFace: true }).promise;
+  let text = '';
+  const maxPages = Math.min(doc.numPages, 5);
+  try {
+    for (let i = 1; i <= maxPages; i++) {
+      const page = await doc.getPage(i);
+      const tc = await page.getTextContent();
+      const str = tc.items.map((it) => it.str || '').join(' ');
+      text += (i > 1 ? '\n\n' : '') + str;
+      if (text.length > PREVIEW_BYTES) break;
+    }
+  } finally {
+    await doc.destroy();
+  }
+  return text.slice(0, PREVIEW_BYTES);
 }
 
 /** 给检索结果补上名称、是否存在、注记视图 */
@@ -647,6 +739,124 @@ async function cleanScan(root, s, signal) {
     + groups.reduce((a, g) => a + g.size * (g.files.length - 1), 0);
 
   return { candidates, groups, byCat, totalBytes, scanned, root };
+}
+
+/**
+ * 同名文件夹合并建议：扫描根目录下的所有文件夹，按「规范化名称」分组，
+ * 找出分散在多处、名字相同的文件夹，估算内容重叠度并推荐合并目标。
+ * 注意：只比对文件名集合（不读内容），用于给出「是否需要合并」的方向性建议。
+ */
+async function mergeSuggest(root, s, signal) {
+  const MAX_DIRS = 150000;
+  const MAX_OVERLAP_K = 60; // 同名组超过此数量的文件夹时，跳过两两重叠计算（多为 node_modules/bin 等系统目录）
+  const nameMap = new Map(); // norm -> [{path, parent, mtimeMs, fileCount, fileNames:[name]}]
+  let count = 0;
+
+  async function walk(dir, depth) {
+    if (signal?.aborted) throw new Error('cancelled');
+    if (count > MAX_DIRS || depth > 16) return;
+    let entries;
+    try { entries = await fsp.readdir(dir, { withFileTypes: true }); } catch { return; }
+    const subDirs = [];
+    const fileNames = [];
+    for (const ent of entries) {
+      if (ent.name.startsWith('.')) continue;
+      const fp = path.join(dir, ent.name);
+      if (ent.isDirectory()) {
+        if (DEFAULT_EXCLUDES.includes(ent.name)) continue;
+        if (s?.scan?.excludeNames?.includes(ent.name)) continue;
+        subDirs.push(fp);
+      } else if (ent.isFile()) {
+        fileNames.push(ent.name.toLowerCase());
+      }
+    }
+    // 记录本目录为同名候选
+    const norm = (dir.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || '').toLowerCase();
+    if (norm) {
+      let mtimeMs = 0;
+      try { mtimeMs = (await fsp.stat(dir)).mtimeMs; } catch { /* skip */ }
+      const arr = nameMap.get(norm) || [];
+      arr.push({ path: dir, parent: path.dirname(dir), mtimeMs, fileCount: fileNames.length, fileNames });
+      nameMap.set(norm, arr);
+      count++;
+    }
+    for (const sd of subDirs) await walk(sd, depth + 1);
+  }
+  await walk(root, 0);
+
+  // 形成同名组
+  const groups = [];
+  for (const [norm, folders] of nameMap) {
+    if (folders.length < 2) continue;
+    let avgOverlap = 0;
+    let computed = true;
+    if (folders.length <= MAX_OVERLAP_K) {
+      let overlapSum = 0, pairCount = 0;
+      for (let i = 0; i < folders.length; i++) {
+        for (let j = i + 1; j < folders.length; j++) {
+          const setA = new Set(folders[i].fileNames);
+          let inter = 0;
+          for (const n of folders[j].fileNames) if (setA.has(n)) inter++;
+          const union = new Set([...folders[i].fileNames, ...folders[j].fileNames]).size || 1;
+          overlapSum += inter / union;
+          pairCount++;
+        }
+      }
+      avgOverlap = pairCount ? overlapSum / pairCount : 0;
+    } else {
+      computed = false;
+    }
+    // 推荐目标：文件数最多者优先，其次修改最新；路径最短的往往更"主"
+    const target = folders.slice().sort(
+      (a, b) => (b.fileCount - a.fileCount) || (b.mtimeMs - a.mtimeMs)
+    )[0];
+    groups.push({
+      name: norm,
+      count: folders.length,
+      folders,
+      avgOverlap,
+      computed,
+      targetPath: target.path,
+      targetFileCount: target.fileCount,
+    });
+  }
+  groups.sort((a, b) => b.count - a.count || b.avgOverlap - a.avgOverlap);
+
+  return { groups, scanned: count, root, withDupName: groups.length };
+}
+
+/**
+ * 执行合并：把 sourcePaths 中每个源文件夹的内容移动进 target，文件名冲突时自动加后缀，
+ * 源目录变空后移入回收站（可撤销）。全程不读取文件内容。
+ */
+async function mergeApply(target, sources) {
+  if (!(await scanner.exists(target))) throw new Error('合并目标文件夹不存在');
+  const results = [];
+  for (const src of sources) {
+    if (src === target) { results.push({ from: src, ok: false, error: '不能合并到自身' }); continue; }
+    let entries;
+    try { entries = await fsp.readdir(src, { withFileTypes: true }); }
+    catch (e) { results.push({ from: src, ok: false, error: e.message }); continue; }
+    let moved = 0, failed = 0;
+    for (const ent of entries) {
+      const from = path.join(src, ent.name);
+      let to = path.join(target, ent.name);
+      if (await scanner.exists(to)) {
+        const ext = path.extname(ent.name);
+        const base = ent.name.slice(0, ent.name.length - ext.length);
+        let k = 1;
+        while (await scanner.exists(to)) { to = path.join(target, `${base}__${k}${ext}`); k++; }
+      }
+      try { await fsp.rename(from, to); moved++; } catch { failed++; }
+    }
+    let removed = false;
+    try {
+      const left = await fsp.readdir(src);
+      if (!left.length) { await shell.trashItem(src); removed = true; }
+    } catch { /* ignore */ }
+    results.push({ from: src, ok: failed === 0, moved, removed, error: failed ? `${failed} 项移动失败` : undefined });
+  }
+  return results;
 }
 
 module.exports = { registerIpc };

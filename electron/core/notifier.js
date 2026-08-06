@@ -10,6 +10,7 @@ const NOTIF_TYPES = {
   staleFolder: 'staleFolder',         // 长时间未分析
   tagComplete: 'tagComplete',         // 批量打标签完成
   changeDetected: 'changeDetected',   // 磁盘内容明显变化
+  appUpdate: 'appUpdate',             // 有可用更新
 };
 
 /** 默认配置（可被用户设置覆盖） */
@@ -19,6 +20,7 @@ const DEFAULTS = {
   [NOTIF_TYPES.staleFolder]: true,
   [NOTIF_TYPES.tagComplete]: true,
   [NOTIF_TYPES.changeDetected]: true,
+  [NOTIF_TYPES.appUpdate]: true,
 };
 
 class Notifier {

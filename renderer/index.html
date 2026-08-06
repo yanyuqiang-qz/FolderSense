@@ -33,6 +33,7 @@
     <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/></symbol>
     <symbol id="i-chat" viewBox="0 0 24 24"><path d="M4 5h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H9l-4 4v-4H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z"/></symbol>
     <symbol id="i-broom" viewBox="0 0 24 24"><path d="M14 3l3 3-2 2-3-3zM4 20l7-7 2 2-7 7zM11.5 8.5L16 13l2-2-4.5-4.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+    <symbol id="i-merge" viewBox="0 0 24 24"><path d="M4 5h4v4H4zM16 5h4v4h-4zM10 15h4v4h-4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M8 7h8M12 9v6M6 9v3a2 2 0 0 0 2 2h2M18 9v3a2 2 0 0 1-2 2h-2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
   </defs>
 </svg>
 
@@ -91,6 +92,9 @@
         </button>
         <button class="nav-item" data-view="clean">
           <svg class="ic"><use href="#i-broom"/></svg><span>清理助手</span>
+        </button>
+        <button class="nav-item" data-view="merge">
+          <svg class="ic"><use href="#i-merge"/></svg><span>合并建议</span>
         </button>
       </nav>
 
@@ -225,6 +229,11 @@
       <div class="view" id="view-clean">
         <div class="clean-agent" id="cleanAgent"></div>
       </div>
+
+      <!-- 同名文件夹合并建议视图 -->
+      <div class="view" id="view-merge">
+        <div class="merge-agent" id="mergeAgent"></div>
+      </div>
     </section>
 
     <!-- 右侧详情 -->
@@ -261,6 +270,7 @@
 <script src="js/panels.js"></script>
 <script src="js/dashboard.js"></script>
 <script src="js/cleanAgent.js"></script>
+<script src="js/mergeAgent.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

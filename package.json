@@ -1,7 +1,7 @@
 {
   "name": "folder-sense",
   "productName": "文件夹管家 FolderSense",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "本地文件夹 AI 语义标签与管理工具（中文优先，跨平台桌面应用）",
   "main": "electron/main.js",
   "author": {
@@ -10,6 +10,10 @@
   },
   "license": "MIT",
   "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yanyuqiang-qz/FolderSense.git"
+  },
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
@@ -32,7 +36,13 @@
     "asarUnpack": [
       "electron/core/**/*"
     ],
-    "publish": false,
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "yanyuqiang-qz",
+        "repo": "FolderSense"
+      }
+    ],
     "files": [
       "electron/**/*",
       "renderer/**/*",
@@ -65,5 +75,10 @@
       ],
       "category": "Utility"
     }
+  },
+  "dependencies": {
+    "adm-zip": "^0.5.18",
+    "electron-updater": "^6.8.9",
+    "pdfjs-dist": "^4.10.38"
   }
 }

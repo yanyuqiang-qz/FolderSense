@@ -11,6 +11,9 @@ const { registerIpc } = require('./ipc');
 const notifier = require('./core/notifier');
 const scheduler = require('./core/scheduler');
 
+let autoUpdater = null;
+try { autoUpdater = require('electron-updater').autoUpdater; } catch { /* 开发模式或依赖缺失时跳过 */ }
+
 const isDev = process.argv.includes('--dev');
 
 // 支持命令行参数：FolderSense.exe analyze "C:\path" 直接打开指定路径
@@ -61,6 +64,23 @@ function applySchedulerSettings(sched) {
     const r = ctx.indexer.startScan(roots, ctx.settings.all().scan);
     if (r.ok) notifier.scanComplete({ mode: 'scheduled' });
   }, intervalMs);
+}
+
+/**
+ * 自动更新：发布模式下检查 GitHub Release 并更新
+ */
+function setupAutoUpdater() {
+  if (!autoUpdater || !app.isPackaged) return; // 开发模式跳过
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.on('update-available', (info) => {
+    notifier.send('appUpdate', '有可用更新', `FolderSense ${info?.version || ''} 已发布，将在后台下载，退出时自动安装。`);
+  });
+  autoUpdater.on('update-downloaded', () => {
+    notifier.send('appUpdate', '更新已就绪', '重启 FolderSense 即可完成更新。');
+  });
+  autoUpdater.on('error', (e) => console.warn('[updater]', e && e.message));
+  autoUpdater.checkForUpdatesAndNotify().catch(() => {});
 }
 
 async function bootstrap() {
@@ -153,6 +173,8 @@ app.whenReady().then(async () => {
   // 启动定时自动扫描任务
   applySchedulerSettings(ctx.settings.all().scheduler);
   createWindow();
+  // 检查自动更新（仅发布模式）
+  setupAutoUpdater();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
